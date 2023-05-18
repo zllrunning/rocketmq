@@ -197,15 +197,20 @@ public class TransactionalMessageBridge {
     }
 
     public CompletableFuture<PutMessageResult> asyncPutHalfMessage(MessageExtBrokerInner messageInner) {
+        //store.asyncPutMessage就是存储普通消息的方法，所以区别就在于parseHalfMessageInner
         return store.asyncPutMessage(parseHalfMessageInner(messageInner));
     }
 
     private MessageExtBrokerInner parseHalfMessageInner(MessageExtBrokerInner msgInner) {
+        //将 Message 原本真实的 Topic 和 MessageQueue 给备份起来，这里的操作和延迟队列里操作是如出一辙
         MessageAccessor.putProperty(msgInner, MessageConst.PROPERTY_REAL_TOPIC, msgInner.getTopic());
         MessageAccessor.putProperty(msgInner, MessageConst.PROPERTY_REAL_QUEUE_ID,
             String.valueOf(msgInner.getQueueId()));
         msgInner.setSysFlag(
             MessageSysFlag.resetTransactionValue(msgInner.getSysFlag(), MessageSysFlag.TRANSACTION_NOT_TYPE));
+        //延迟队列会将所有的 Message 暂存到 SCHEDULE_TOPIC_XXXX 当中，而事务消息则会将其存到 RMQ_SYS_TRANS_HALF_TOPIC 当中，
+        // 此 Topic 是通过 TransactionalMessageUtil.buildHalfTopic() 拿到的，并且所有的 Half Message 全部都写入到 queueId 为 0 的 MessageQueue。
+        // 一个 Topic 下如果只有 1 个 MessageQueue，那么这个 Topic 下的所有 Message 就是全局有序的，它们会按照先来后到的顺序被消费。
         msgInner.setTopic(TransactionalMessageUtil.buildHalfTopic());
         msgInner.setQueueId(0);
         msgInner.setPropertiesString(MessageDecoder.messageProperties2String(msgInner.getProperties()));

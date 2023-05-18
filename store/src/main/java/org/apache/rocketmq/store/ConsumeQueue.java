@@ -28,10 +28,35 @@ import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.config.BrokerRole;
 import org.apache.rocketmq.store.config.StorePathConfigHelper;
-
+//一条 ConsumeQueue 记录和一条 Message 一一对应，实际生产中会产生多条 ConsumeQueue 记录
+//一个 ConsumeQueue 文件中会包含 30 万（MessageStoreConfig.mappedFileSizeConsumeQueue ）条 ConsumeQueue 记录，而每条记录长度为 20 字节，那么一个 ConsumeQueue 文件的大小就为 20 * 300000 = 6000000，即约等于 6000000 / 1024 / 1024，也就是大约 5.72M
+//ConsumeQueue 文件存储的位置其实在 broker.conf 中配置过了  storePathConsumeQueue
+/*└── TopicTest
+        ├── 0
+        │   └── 00000000000000000000
+        ├── 1
+        │   └── 00000000000000000000
+        ├── 2
+        │   └── 00000000000000000000
+        └── 3
+            └── 00000000000000000000
+目录组织是根据 Topic + MessageQueue 来的，每一个 MessageQueue 都是一个单独的目录，命名则是 MessageQueue 的 ID，每个目录中会存在多个 ConsumeQueue 文件。
+        */
 public class ConsumeQueue {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
-
+    //一条 ConsumeQueue 记录总共 20 个字节
+    /*
+    * putMessagePositionInfo方法
+    *
+        this.byteBufferIndex.limit(CQ_STORE_UNIT_SIZE);
+        this.byteBufferIndex.putLong(offset);
+        this.byteBufferIndex.putInt(size);
+        this.byteBufferIndex.putLong(tagsCode);
+        *
+        物理偏移量：占 8 个字节，即在 CommitLog 文件当中的实际偏移量。
+        消息体长度：占 4 个字节，代表索引指向的这条 Message 的长度。
+        Tag 哈希值：占 8 个字节，这个也是 RocketMQ 的特性 —— 消息过滤的原理。在 Broker 侧消费 Message 时，即可根据 Consumer 指定的 Tag 来对消息进行过滤。
+    * */
     public static final int CQ_STORE_UNIT_SIZE = 20;
     private static final InternalLogger LOG_ERROR = InternalLoggerFactory.getLogger(LoggerName.STORE_ERROR_LOGGER_NAME);
 

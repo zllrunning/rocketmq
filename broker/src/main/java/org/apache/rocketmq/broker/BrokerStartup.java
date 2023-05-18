@@ -138,6 +138,7 @@ public class BrokerStartup {
                 System.exit(-2);
             }
 
+            //支持多namesrv，;分割即可，但这里只是做校验，并没有解析
             String namesrvAddr = brokerConfig.getNamesrvAddr();
             if (null != namesrvAddr) {
                 try {

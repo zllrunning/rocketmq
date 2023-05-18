@@ -41,6 +41,11 @@ import org.apache.rocketmq.common.protocol.heartbeat.ConsumeType;
 import org.apache.rocketmq.common.protocol.heartbeat.MessageModel;
 import org.apache.rocketmq.common.protocol.heartbeat.SubscriptionData;
 
+/**
+ * 1.consumer启动的时候会执行一次
+ * 2。会启动一个定时任务，每隔 20 秒周期性地执行 Rebalance
+ * 3.Broker在收到 Consumer 的心跳、判断有新的 Consumer 加入时，会向当前 ConsumerGroup 下所有的 Consumer 实例发送请求，要求它们重新执行 Rebalance
+ */
 public abstract class RebalanceImpl {
     protected static final InternalLogger log = ClientLogger.getLog();
     protected final ConcurrentMap<MessageQueue, ProcessQueue> processQueueTable = new ConcurrentHashMap<MessageQueue, ProcessQueue>(64);
@@ -256,6 +261,8 @@ public abstract class RebalanceImpl {
                 break;
             }
             case CLUSTERING: {
+                //DefaultMQPushConsumerImpl的updateTopicSubscribeInfoWhenSubscriptionChanged()方法会从namesrv获取值设置topicSubscribeInfoTable。
+                //topic对应的MessageQueue
                 Set<MessageQueue> mqSet = this.topicSubscribeInfoTable.get(topic);
                 List<String> cidAll = this.mQClientFactory.findConsumerIdList(topic, consumerGroup);
                 if (null == mqSet) {
@@ -274,7 +281,7 @@ public abstract class RebalanceImpl {
 
                     Collections.sort(mqAll);
                     Collections.sort(cidAll);
-
+                    //为consumer分配messageQueue的策略
                     AllocateMessageQueueStrategy strategy = this.allocateMessageQueueStrategy;
 
                     List<MessageQueue> allocateResult = null;

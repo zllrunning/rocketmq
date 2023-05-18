@@ -286,6 +286,7 @@ public class MQClientInstance {
             public void run() {
                 try {
                     MQClientInstance.this.cleanOfflineBroker();
+                    //向broker发送心跳
                     MQClientInstance.this.sendHeartbeatToAllBrokerWithLock();
                 } catch (Exception e) {
                     log.error("ScheduledTask sendHeartbeatToAllBroker exception", e);

@@ -306,6 +306,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
         final long beginTimestamp = System.currentTimeMillis();
 
+        //拉取消息注册的回调
         PullCallback pullCallback = new PullCallback() {
             @Override
             public void onSuccess(PullResult pullResult) {
@@ -593,20 +594,25 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 this.rebalanceImpl.setMessageModel(this.defaultMQPushConsumer.getMessageModel());
                 this.rebalanceImpl.setAllocateMessageQueueStrategy(this.defaultMQPushConsumer.getAllocateMessageQueueStrategy());
                 this.rebalanceImpl.setmQClientFactory(this.mQClientFactory);
-
+                //初始化负责拉取消息的核心组件
                 this.pullAPIWrapper = new PullAPIWrapper(
                     mQClientFactory,
                     this.defaultMQPushConsumer.getConsumerGroup(), isUnitMode());
                 this.pullAPIWrapper.registerFilterMessageHook(filterMessageHookList);
-
+                //OffsetStore 是用于记录当前消费者消费进度的一个组件。当 Consumer 由于某些原因中断了正常的消费，当它再次重启之后怎么知道该从哪里继续消费呢？OffsetStore 会帮助我们确定
                 if (this.defaultMQPushConsumer.getOffsetStore() != null) {
                     this.offsetStore = this.defaultMQPushConsumer.getOffsetStore();
                 } else {
+                    //MessageModel 默认是 CLUSTERING
+                    //BROADCASTING （代表广播的意思），那么 Message 会被每一个实例消费到
+                    //CLUSTERING 会把一个 ConsumerGroup 中的所有 Consumer 当作一个整体，ID 为 100 的 Message 只会被 ConsumerGroup 中的任意 Consumer 消费一次
                     switch (this.defaultMQPushConsumer.getMessageModel()) {
                         case BROADCASTING:
+                            //将消费进度存储在 Consumer 本地，Consumer 会在磁盘上生成文件以保存进度
                             this.offsetStore = new LocalFileOffsetStore(this.mQClientFactory, this.defaultMQPushConsumer.getConsumerGroup());
                             break;
                         case CLUSTERING:
+                            //将消费进度保存在远端的 Broker
                             this.offsetStore = new RemoteBrokerOffsetStore(this.mQClientFactory, this.defaultMQPushConsumer.getConsumerGroup());
                             break;
                         default:
@@ -616,6 +622,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 }
                 this.offsetStore.load();
 
+                //会通过 Consumer 初始化时注册的 Listener 类型来确定消费的模式  顺序消费还是并发消费
                 if (this.getMessageListenerInner() instanceof MessageListenerOrderly) {
                     this.consumeOrderly = true;
                     this.consumeMessageService =
@@ -651,10 +658,21 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             default:
                 break;
         }
-
+        //从 NameServer 侧获取路由数据，在拿到数据之后会将 Topic 下的 MessageQueue 信息写入到 topicSubscribeInfoTable 当中
         this.updateTopicSubscribeInfoWhenSubscriptionChanged();
         this.mQClientFactory.checkClientInBroker();
+        //立即发送一次心跳
+        //之前在 MQClientInstance start() 的启动定时任务环节不是已经发送了心跳吗？怎么这里还要发心跳
+        //MQClientInstance 中启动的只是定时任务，以保证后续持续地发送心跳。并且它有个参数叫 initialDelay，代表首次延迟执行的时间，这里给的是 1000ms，即 1 秒
+        //所以，如果不立即发送一次心跳，那么 Consumer 上线，再到 Broker 感知到它就会有 1 秒的延迟
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
+        //为什么 Consumer 在启动时要立即 Rebalance 一次呢    无论当前这个 Consumer 是之前已经有消费记录的实例，还是一个全新的实例，它的加入都会打破原有的 MessageQueue 分配
+        //如果此时不进行 Rebalance，那么新加入的消费者组将不会消费到任何消息，因为根本没有 MessageQueue 分配给它
+        /*
+         * 1.consumer启动的时候会执行一次
+         * 2.会启动一个定时任务，每隔 20 秒周期性地执行 Rebalance
+         * 3.Broker在收到 Consumer 的心跳、判断有新的 Consumer 加入时，会向当前 ConsumerGroup 下所有的 Consumer 实例发送请求，要求它们重新执行 Rebalance
+         * */
         this.mQClientFactory.rebalanceImmediately();
     }
 

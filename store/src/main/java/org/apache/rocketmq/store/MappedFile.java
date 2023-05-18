@@ -170,6 +170,8 @@ public class MappedFile extends ReferenceResource {
 
         try {
             this.fileChannel = new RandomAccessFile(this.file, "rw").getChannel();
+            //MappedByteBuffer 的作用就是将创建好的 CommitLog 文件通过 FileChannel 的 map 方法映射到内存中，
+            // 这样后续对 CommitLog 文件的修改可以直接操作内存，不用每次都用 IO 从磁盘获取数据，这也是 RocketMQ 高性能的底层原理之一
             this.mappedByteBuffer = this.fileChannel.map(MapMode.READ_WRITE, 0, fileSize);
             TOTAL_MAPPED_VIRTUAL_MEMORY.addAndGet(fileSize);
             TOTAL_MAPPED_FILES.incrementAndGet();
@@ -221,6 +223,7 @@ public class MappedFile extends ReferenceResource {
             byteBuffer.position(currentPos);
             AppendMessageResult result;
             if (messageExt instanceof MessageExtBrokerInner) {
+                //将 Message 追加到 Buffer 当中
                 result = cb.doAppend(this.getFileFromOffset(), byteBuffer, this.fileSize - currentPos,
                         (MessageExtBrokerInner) messageExt, putMessageContext);
             } else if (messageExt instanceof MessageExtBatch) {

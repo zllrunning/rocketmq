@@ -22,6 +22,8 @@ import java.util.Random;
 public class ThreadLocalIndex {
     private final ThreadLocal<Integer> threadLocalIndex = new ThreadLocal<Integer>();
     private final Random random = new Random();
+
+    //0111 1111 1111 1111 1111 1111 1111 1111   十六进制的int的最大值
     private final static int POSITIVE_MASK = 0x7FFFFFFF;
 
     public int incrementAndGet() {

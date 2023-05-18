@@ -463,6 +463,9 @@ public class DefaultMessageStore implements MessageStore {
 
 
         long beginTime = this.getSystemClock().now();
+        //Message 会交给 commitLog 持久化到磁盘
+        //其实 Message 存储在 CommitLog 当中不是很准确，因为其底层还有一层封装，叫 MappedFile，数据实际上是存储在 MappedFile 所对应的磁盘文件当中的，
+        //  CommitLog 内部维护着MappedFileQueue，管理零散的 MappedFile
         CompletableFuture<PutMessageResult> putResultFuture = this.commitLog.asyncPutMessage(msg);
 
         putResultFuture.thenAccept(result -> {
@@ -1633,7 +1636,7 @@ public class DefaultMessageStore implements MessageStore {
             }
         }, 6, TimeUnit.SECONDS);
     }
-
+    //负责构建 ConsumeQueue 记录
     class CommitLogDispatcherBuildConsumeQueue implements CommitLogDispatcher {
 
         @Override
@@ -1650,7 +1653,7 @@ public class DefaultMessageStore implements MessageStore {
             }
         }
     }
-
+    //负责构建 IndexFile   ConsumQueue 是消费消息的索引，而 IndexFile 则是通过 Key 或者时间区间来查询 Message 的索引
     class CommitLogDispatcherBuildIndex implements CommitLogDispatcher {
 
         @Override

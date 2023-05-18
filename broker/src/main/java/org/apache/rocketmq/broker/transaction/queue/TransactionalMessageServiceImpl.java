@@ -168,6 +168,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                         Long removedOpOffset = removeMap.remove(i);
                         doneOpOffset.add(removedOpOffset);
                     } else {
+                        //由于当前的 Half Message 还没有被 COMMIT、ROLLBACK，所以它仍然还存储在系统 Topic 当中，为了要执行后续的逻辑，需要先把它取出来
                         GetResult getResult = getHalfMsg(messageQueue, i);
                         MessageExt msgExt = getResult.getMsg();
                         if (msgExt == null) {
@@ -186,8 +187,11 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                                 continue;
                             }
                         }
-
+                        //needDiscard() 主要是判断当前 Message 的检查次数，是否超过了最大值，即上面传入的 checkMax 所代表的值。
+                        // 这里会将当前的检查次数存储在 Message 的 Property 的 PROPERTY_TRANSACTION_CHECK_TIMES 当中
+                        //needSkip() 主要是判断当前 Half Message 存在是否超过了 Message 保存的上限，即 3 天。这个时间是在 MessageStoreConfig 当中配置的
                         if (needDiscard(msgExt, transactionCheckMax) || needSkip(msgExt)) {
+
                             listener.resolveDiscardMsg(msgExt);
                             newOffset = i + 1;
                             i++;
@@ -224,9 +228,14 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                             || (valueOfCurrentMinusBorn <= -1);
 
                         if (isNeedCheck) {
+                            //putBackHalfMsgQueue() 会将当前 Message 再次投递进事务消息专用队列当中
+                            //一旦判定为需要执行事务回查逻辑，那么当前这条 Half Message 就算已经被消费了。
+                            // 但如果后续调用 resolveHalfMsg() 失败了没有拿到结果怎么办？这里明显是还要重试的，
+                            // 所以为了让整个链路串起来，在没达到最大的校验次数之前，都还需要将其投递到事务队列当中，以便下次再次执行 Check 逻辑
                             if (!putBackHalfMsgQueue(msgExt, i)) {
                                 continue;
                             }
+                            //会包括：Broker 会向 Producer 发送一个 RequestCode 为 CHECK_TRANSACTION_STATE 的请求，顾名思义，通知 Producer，赶紧查查这条 Message 所对应的事务状态
                             listener.resolveHalfMsg(msgExt);
                         } else {
                             pullResult = fillOpRemoveMap(removeMap, opQueue, pullResult.getNextBeginOffset(), halfOffset, doneOpOffset);

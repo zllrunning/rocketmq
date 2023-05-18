@@ -158,6 +158,7 @@ public class BrokerConfig {
      * This configurable item defines interval of topics registration of broker to name server. Allowing values are
      * between 10, 000 and 60, 000 milliseconds.
      */
+    //默认心跳间隔为 30 秒
     private int registerNameServerPeriod = 1000 * 30;
 
     /**

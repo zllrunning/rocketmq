@@ -317,6 +317,7 @@ public class ScheduleMessageService extends ConfigManager {
         TopicFilterType topicFilterType = MessageExt.parseTopicFilterType(msgInner.getSysFlag());
         long tagsCodeValue =
             MessageExtBrokerInner.tagsString2tagsCode(topicFilterType, msgInner.getTags());
+        //TagsCode 给设置成原有的值
         msgInner.setTagsCode(tagsCodeValue);
         msgInner.setPropertiesString(MessageDecoder.messageProperties2String(msgExt.getProperties()));
 
@@ -327,12 +328,14 @@ public class ScheduleMessageService extends ConfigManager {
         msgInner.setReconsumeTimes(msgExt.getReconsumeTimes());
 
         msgInner.setWaitStoreMsgOK(false);
+        // 清除掉延迟信息的标记  如果这里不清除，下次存储时会直接套娃，又把这条本应该是正常的 Message 当成延迟消息处理
         MessageAccessor.clearProperty(msgInner, MessageConst.PROPERTY_DELAY_TIME_LEVEL);
-
+        // 设置真实的 Topic
         msgInner.setTopic(msgInner.getProperty(MessageConst.PROPERTY_REAL_TOPIC));
-
+        // 拿到真实的 MessageQueueId
         String queueIdStr = msgInner.getProperty(MessageConst.PROPERTY_REAL_QUEUE_ID);
         int queueId = Integer.parseInt(queueIdStr);
+        //设置真实的queueId
         msgInner.setQueueId(queueId);
 
         return msgInner;
@@ -426,7 +429,11 @@ public class ScheduleMessageService extends ConfigManager {
                     long now = System.currentTimeMillis();
                     long deliverTimestamp = this.correctDeliverTimestamp(now, tagsCode);
                     nextOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
+                    //如果是当前时间超过了 deliverTimestamp，则说明投递时间已经到了，需要将该 Message 投递到指定的 Message。
+                    // 如果是当前时间小于 deliverTimestamp，则说明投递的时间还没到，那既然还没到，那就直接不执行后面的逻辑，等下次任务再 Check
 
+                    //为什么当前 MessageQueue 就一条 Message 时间没到就会整个暂停，然后等待下次运行，难道不需要检查 MessageQueue 的其他消息了吗
+                    //这要得益于 RocketMQ 对于拥有相同延迟等级的 Message 会投递到相同 MessageQueue 的设计，在同一个 MessageQueue 当中，所有的 Message 先进先出
                     long countdown = deliverTimestamp - now;
                     if (countdown > 0) {
                         this.scheduleNextTimerTask(nextOffset, DELAY_FOR_A_WHILE);

@@ -24,15 +24,20 @@ import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.apache.rocketmq.common.message.MessageExt;
+import org.apache.rocketmq.common.protocol.heartbeat.MessageModel;
 
 public class PushConsumer {
 
     public static void main(String[] args) throws InterruptedException, MQClientException {
         DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("CID_JODIE_1");
         consumer.subscribe("TopicTest", "*");
+        consumer.setNamesrvAddr("127.0.0.1:9876");
         consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
         //wrong time format 2017_0422_221800
+        //RocketMQ 高级特性之一，即消息回溯。可以从指定的时间开始重新消费 Message
         consumer.setConsumeTimestamp("20181109221800");
+        //consumer.setMessageModel(MessageModel.CLUSTERING);
+        //consumer.setMessageModel(MessageModel.BROADCASTING);
         consumer.registerMessageListener(new MessageListenerConcurrently() {
 
             @Override

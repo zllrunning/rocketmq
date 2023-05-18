@@ -345,7 +345,7 @@ public class BrokerController {
             this.consumerManageExecutor =
                 Executors.newFixedThreadPool(this.brokerConfig.getConsumerManageThreadPoolNums(), new ThreadFactoryImpl(
                     "ConsumerManageThread_"));
-
+            //注册处理器，这个 Processor 就是 Broker 中处理不同请求的 Handler
             this.registerProcessor();
 
             final long initialDelay = UtilAll.computeNextMorningTimeMillis() - System.currentTimeMillis();
@@ -889,6 +889,7 @@ public class BrokerController {
             this.registerBrokerAll(true, false, true);
         }
 
+        //启动心跳，心跳不只是心跳，也会带着一些数据一并送过去
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -899,6 +900,8 @@ public class BrokerController {
                     log.error("registerBrokerAll Exception", e);
                 }
             }
+        //    Math.max(10000, Math.min(brokerConfig.getRegisterNameServerPeriod(), 60000)) 心跳间隔给控制在了 [10, 60] 秒之间
+            //默认心跳间隔为 30 秒
         }, 1000 * 10, Math.max(10000, Math.min(brokerConfig.getRegisterNameServerPeriod(), 60000)), TimeUnit.MILLISECONDS);
 
         if (this.brokerStatsManager != null) {
@@ -930,6 +933,8 @@ public class BrokerController {
         doRegisterBrokerAll(true, false, topicConfigSerializeWrapper);
     }
 
+    //启动的时候会立刻发送一次心跳
+    //后续心跳在一个定时任务里执行，由forceRegister || needRegister共同判断是否需要发送
     public synchronized void registerBrokerAll(final boolean checkOrderConfig, boolean oneway, boolean forceRegister) {
         TopicConfigSerializeWrapper topicConfigWrapper = this.getTopicConfigManager().buildTopicConfigSerializeWrapper();
 
@@ -945,6 +950,9 @@ public class BrokerController {
             topicConfigWrapper.setTopicConfigTable(topicConfigTable);
         }
 
+        //当 forceRegister 为 false 时，只有 needRegister() 方法判定为 true 时，才会执行注册逻辑。
+        // 这里的判断逻辑实际上很简单粗暴，Broker 会去请求所有的 NameServer，查询自己传给 NameServer 的数据，然后跟自己本地的数据版本做一个对比
+        //只要有任何一台 NameServer 的数据是旧的，Broker 就会重新执行心跳，换句话说：needRegister() 的判定就会为 true
         if (forceRegister || needRegister(this.brokerConfig.getBrokerClusterName(),
             this.getBrokerAddr(),
             this.brokerConfig.getBrokerName(),
@@ -956,6 +964,7 @@ public class BrokerController {
 
     private void doRegisterBrokerAll(boolean checkOrderConfig, boolean oneway,
         TopicConfigSerializeWrapper topicConfigWrapper) {
+        //构建数据 发送心跳的地方
         List<RegisterBrokerResult> registerBrokerResultList = this.brokerOuterAPI.registerBrokerAll(
             this.brokerConfig.getBrokerClusterName(),
             this.getBrokerAddr(),
@@ -993,6 +1002,7 @@ public class BrokerController {
         TopicConfigSerializeWrapper topicConfigWrapper = this.getTopicConfigManager().buildTopicConfigSerializeWrapper();
         List<Boolean> changeList = brokerOuterAPI.needRegister(clusterName, brokerAddr, brokerName, brokerId, topicConfigWrapper, timeoutMills);
         boolean needRegister = false;
+        //但凡有一台 NameServer 的数据是旧的, 都要执行心跳
         for (Boolean changed : changeList) {
             if (changed) {
                 needRegister = true;

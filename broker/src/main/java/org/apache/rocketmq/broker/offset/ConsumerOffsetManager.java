@@ -37,6 +37,12 @@ public class ConsumerOffsetManager extends ConfigManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
     protected static final String TOPIC_GROUP_SEPARATOR = "@";
 
+    /*
+    * {topic@consumerGroup:{
+    *   QueueId: offset
+    * }}
+    *
+    * */
     protected ConcurrentMap<String/* topic@group */, ConcurrentMap<Integer, Long>> offsetTable =
         new ConcurrentHashMap<String, ConcurrentMap<Integer, Long>>(512);
 

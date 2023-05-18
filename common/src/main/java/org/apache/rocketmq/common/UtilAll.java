@@ -85,6 +85,9 @@ public class UtilAll {
     }
 
     public static String offset2FileName(final long offset) {
+        //00000000000000000000
+        //00000000001073741824
+        //mappedFile的文件名
         final NumberFormat nf = NumberFormat.getInstance();
         nf.setMinimumIntegerDigits(20);
         nf.setMaximumFractionDigits(0);

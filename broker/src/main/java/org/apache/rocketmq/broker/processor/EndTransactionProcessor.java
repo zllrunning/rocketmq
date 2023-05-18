@@ -62,7 +62,7 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
             LOGGER.warn("Message store is slave mode, so end transaction is forbidden. ");
             return response;
         }
-
+        //在 Broker 启动时，会启动一个线程，定期地扫描 Half Message 所在的 Topic，看看哪些 Half Message 需要进行事务回查，这部分的逻辑是由 TransactionalMessageCheckService 来承载的。
         if (requestHeader.getFromTransactionCheck()) {
             switch (requestHeader.getCommitOrRollback()) {
                 case MessageSysFlag.TRANSACTION_NOT_TYPE: {
@@ -128,14 +128,18 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
             if (result.getResponseCode() == ResponseCode.SUCCESS) {
                 RemotingCommand res = checkPrepareMessage(result.getPrepareMessage(), requestHeader);
                 if (res.getCode() == ResponseCode.SUCCESS) {
+                    //构建正式需要投递的 Message
                     MessageExtBrokerInner msgInner = endMessageTransaction(result.getPrepareMessage());
                     msgInner.setSysFlag(MessageSysFlag.resetTransactionValue(msgInner.getSysFlag(), requestHeader.getCommitOrRollback()));
                     msgInner.setQueueOffset(requestHeader.getTranStateTableOffset());
                     msgInner.setPreparedTransactionOffset(requestHeader.getCommitLogOffset());
                     msgInner.setStoreTimestamp(result.getPrepareMessage().getStoreTimestamp());
+                    // 清除掉 Half Message 的标记, 这代表这是一个正常的 Message 了
                     MessageAccessor.clearProperty(msgInner, MessageConst.PROPERTY_TRANSACTION_PREPARED);
+                    // 将 Message 投递到真正的 Topic 中，让消费者能够消费到;
                     RemotingCommand sendResult = sendFinalMessage(msgInner);
                     if (sendResult.getCode() == ResponseCode.SUCCESS) {
+                        // 将 Half Message 删除，并不是真正删除，是会给 Message 打上一个删除的 Tag
                         this.brokerController.getTransactionalMessageService().deletePrepareMessage(result.getPrepareMessage());
                     }
                     return sendResult;

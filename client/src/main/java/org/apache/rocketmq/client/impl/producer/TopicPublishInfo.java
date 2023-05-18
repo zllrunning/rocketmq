@@ -67,9 +67,11 @@ public class TopicPublishInfo {
     }
 
     public MessageQueue selectOneMessageQueue(final String lastBrokerName) {
+        //首次投递lastBrokerName为null,第 2、3 次循环时 mq 才有值，而进行到了 2、3 次就说明首次投递失败，需要重新进行选择
         if (lastBrokerName == null) {
             return selectOneMessageQueue();
         } else {
+            //重投会判断是否选择的是上次的broker，如果是重新选择（如果再选到同一台 Broker 投递大概率还是会继续失败，所以为了尽可能地让 Message 投递成功，会选择另一台 Broker 进行投递）
             for (int i = 0; i < this.messageQueueList.size(); i++) {
                 int index = this.sendWhichQueue.incrementAndGet();
                 int pos = Math.abs(index) % this.messageQueueList.size();
@@ -83,7 +85,7 @@ public class TopicPublishInfo {
             return selectOneMessageQueue();
         }
     }
-
+    //线性轮询
     public MessageQueue selectOneMessageQueue() {
         int index = this.sendWhichQueue.incrementAndGet();
         int pos = Math.abs(index) % this.messageQueueList.size();

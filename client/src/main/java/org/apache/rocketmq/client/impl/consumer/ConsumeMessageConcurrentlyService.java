@@ -266,7 +266,10 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             default:
                 break;
         }
-
+        //ackIndex 的默认值为 Integer.MAX_VALUE，所以在 CONSUME_SUCCESS case 的分支判断逻辑中，ackIndex 是一定大于取到的 Message 的 size 的，所以 ackIndex 就会被赋值为 消息长度 - 1
+        //对于消费成功的场景，ackIndex 的值为 0。对于消费失败的场景，ackIndex 的值为 -1。
+        // 既然 ackIndex 在消费成功时值为 0，那么此时 for 循环就会变成 for (int i = 0 + 1; i < 1; i++)，即不会进入到循环体当中去，
+        // 所以我们证明了在成功消费之后，是不会执行 sendMessageBack() 的相关逻辑的
         switch (this.defaultMQPushConsumer.getMessageModel()) {
             case BROADCASTING:
                 for (int i = ackIndex + 1; i < consumeRequest.getMsgs().size(); i++) {
@@ -278,6 +281,8 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 List<MessageExt> msgBackFailed = new ArrayList<MessageExt>(consumeRequest.getMsgs().size());
                 for (int i = ackIndex + 1; i < consumeRequest.getMsgs().size(); i++) {
                     MessageExt msg = consumeRequest.getMsgs().get(i);
+                    //在成功消费之后，是不会执行 sendMessageBack() 的相关逻辑的
+                    //消费失败才会执行
                     boolean result = this.sendMessageBack(msg, context);
                     if (!result) {
                         msg.setReconsumeTimes(msg.getReconsumeTimes() + 1);
@@ -399,6 +404,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                         MessageAccessor.setConsumeStartTimeStamp(msg, String.valueOf(System.currentTimeMillis()));
                     }
                 }
+                //consumer的回调
                 status = listener.consumeMessage(Collections.unmodifiableList(msgs), context);
             } catch (Throwable e) {
                 log.warn(String.format("consumeMessage exception: %s Group: %s Msgs: %s MQ: %s",
@@ -432,6 +438,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                     ConsumeMessageConcurrentlyService.this.consumerGroup,
                     msgs,
                     messageQueue);
+                //像回调里面抛异常这种，status为null，会被标记为待会重新消费
                 status = ConsumeConcurrentlyStatus.RECONSUME_LATER;
             }
 

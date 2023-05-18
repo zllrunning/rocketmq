@@ -48,6 +48,12 @@ public class AllocateMappedFileService extends ServiceThread {
         this.messageStore = messageStore;
     }
 
+    //整个“核心”函数的最“核心”操作居然就只是在向 this.requestQueue 和 this.requestTable 这两个变量当中写入数据，而创建文件、落磁盘相关的代码是一行都没看到
+    //创建文件采用的是内存队列的方式。而this.requestQueue 就是这个内存队列，
+    // putRequestAndReturnMappedFile 要做的事情就是将创建文件的请求写入到 this.requestQueue 这个当中，而真正处理此请求、并在磁盘上创建文件的是另一个地方
+    //内存队列也是消息队列的一种，那么既然是消息队列则其中必然有 Producer、Consumer。
+    // 在这里，Producer 就是 AllocateMappedFileService，Consumer 还是它自己
+    //在DefaultMessageStore中，this.allocateMappedFileService.start();调用mmapOperation()方法，消费的地方
     public MappedFile putRequestAndReturnMappedFile(String nextFilePath, String nextNextFilePath, int fileSize) {
         int canSubmitRequests = 2;
         if (this.messageStore.getMessageStoreConfig().isTransientStorePoolEnable()) {
@@ -147,6 +153,7 @@ public class AllocateMappedFileService extends ServiceThread {
         boolean isSuccess = false;
         AllocateRequest req = null;
         try {
+            //从队列中消费
             req = this.requestQueue.take();
             AllocateRequest expectedRequest = this.requestTable.get(req.getFilePath());
             if (null == expectedRequest) {
@@ -159,7 +166,7 @@ public class AllocateMappedFileService extends ServiceThread {
                     + req.getFileSize() + ", req:" + req + ", expectedRequest:" + expectedRequest);
                 return true;
             }
-
+            //为null说明没有创建mappedFile呢
             if (req.getMappedFile() == null) {
                 long beginTime = System.currentTimeMillis();
 

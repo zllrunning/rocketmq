@@ -199,9 +199,11 @@ public class MappedFileQueue {
 
     public MappedFile getLastMappedFile(final long startOffset, boolean needCreate) {
         long createOffset = -1;
+        // 首次启动, mappedFile 都是空的, 所以这里肯定拿不到东西
         MappedFile mappedFileLast = getLastMappedFile();
 
         if (mappedFileLast == null) {
+            // 由于 startOffset 传入的是 0, 那么这里的 createOffset 算出来也是 0
             createOffset = startOffset - (startOffset % this.mappedFileSize);
         }
 
@@ -226,6 +228,7 @@ public class MappedFileQueue {
     protected MappedFile doCreateMappedFile(String nextFilePath, String nextNextFilePath) {
         MappedFile mappedFile = null;
 
+        // 实际的文件创建是由 putRequestAndReturnMappedFile 来执行的
         if (this.allocateMappedFileService != null) {
             mappedFile = this.allocateMappedFileService.putRequestAndReturnMappedFile(nextFilePath,
                     nextNextFilePath, this.mappedFileSize);

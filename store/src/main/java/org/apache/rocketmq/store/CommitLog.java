@@ -633,7 +633,8 @@ public class CommitLog {
                 MessageAccessor.putProperty(msg, MessageConst.PROPERTY_REAL_TOPIC, msg.getTopic());
                 MessageAccessor.putProperty(msg, MessageConst.PROPERTY_REAL_QUEUE_ID, String.valueOf(msg.getQueueId()));
                 msg.setPropertiesString(MessageDecoder.messageProperties2String(msg.getProperties()));
-
+                //所有的延迟消息并不会直接存储到指定的 Topic，而是会被 RocketMQ “劫胡”。延迟消息都会被存储到 RocketMQ 的一个内部 Topic SCHEDULE_TOPIC_XXXX 当中
+                //SCHEDULE_TOPIC_XXXX 总共有 18 个 MessageQueue，对应着延迟消息的 18 个等级，RocektMQ 会根据指定的 DelayTimeLevel 来决定选择哪个 MessageQueue
                 msg.setTopic(topic);
                 msg.setQueueId(queueId);
             }
@@ -664,6 +665,7 @@ public class CommitLog {
 
         putMessageLock.lock(); //spin or ReentrantLock ,depending on store config
         try {
+            //mappedFileQueue-》CopyOnWriteArrayList<MappedFile> mappedFiles，getLastMappedFile获取数组的最后一个元素，也就是当前正在使用的 MappedFile
             MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile();
             long beginLockTimestamp = this.defaultMessageStore.getSystemClock().now();
             this.beginTimeInLock = beginLockTimestamp;
@@ -673,13 +675,15 @@ public class CommitLog {
             msg.setStoreTimestamp(beginLockTimestamp);
 
             if (null == mappedFile || mappedFile.isFull()) {
+                //拿到的结果为空，或者文件写满了，都会执行 this.mappedFileQueue.getLastMappedFile(0);
+                // 这个逻辑来创建一个新的 MappedFile。没错，它虽然从命名上看是个获取类的操作，但实际上隐含了创建的操作在其中
                 mappedFile = this.mappedFileQueue.getLastMappedFile(0); // Mark: NewFile may be cause noise
             }
             if (null == mappedFile) {
                 log.error("create mapped file1 error, topic: " + msg.getTopic() + " clientAddr: " + msg.getBornHostString());
                 return CompletableFuture.completedFuture(new PutMessageResult(PutMessageStatus.CREATE_MAPEDFILE_FAILED, null));
             }
-
+            //写入message
             result = mappedFile.appendMessage(msg, this.appendMessageCallback, putMessageContext);
             switch (result.getStatus()) {
                 case PUT_OK:
@@ -1072,6 +1076,7 @@ public class CommitLog {
                 boolean flushCommitLogTimed = CommitLog.this.defaultMessageStore.getMessageStoreConfig().isFlushCommitLogTimed();
 
                 int interval = CommitLog.this.defaultMessageStore.getMessageStoreConfig().getFlushIntervalCommitLog();
+                //每次刷 4 页的数据到磁盘当中
                 int flushPhysicQueueLeastPages = CommitLog.this.defaultMessageStore.getMessageStoreConfig().getFlushCommitLogLeastPages();
 
                 int flushPhysicQueueThoroughInterval =
@@ -1099,6 +1104,7 @@ public class CommitLog {
                     }
 
                     long begin = System.currentTimeMillis();
+                    //刷盘的接力棒会交到 MappedFileQueue
                     CommitLog.this.mappedFileQueue.flush(flushPhysicQueueLeastPages);
                     long storeTimestamp = CommitLog.this.mappedFileQueue.getStoreTimestamp();
                     if (storeTimestamp > 0) {

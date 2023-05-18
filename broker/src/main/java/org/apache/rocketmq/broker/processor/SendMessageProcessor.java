@@ -143,8 +143,9 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             response.setRemark(null);
             return CompletableFuture.completedFuture(response);
         }
-
+        //"%RETRY%" + Group
         String newTopic = MixAll.getRetryTopic(requestHeader.getGroup());
+        //结果只会是1
         int queueIdInt = ThreadLocalRandom.current().nextInt(99999999) % subscriptionGroupConfig.getRetryQueueNums();
         int topicSysFlag = 0;
         if (requestHeader.isUnitMode()) {
@@ -188,9 +189,10 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                 maxReconsumeTimes = times;
             }
         }
-
+        //消息的重试最多进行 16 次，如果超过了 16 次就会将其丢进死信队列当中了
         if (msgExt.getReconsumeTimes() >= maxReconsumeTimes
             || delayLevel < 0) {
+            //"%DLQ%" + group   Dead-Letter Queue，即死信队列
             newTopic = MixAll.getDLQTopic(requestHeader.getGroup());
             queueIdInt = ThreadLocalRandom.current().nextInt(99999999) % DLQ_NUMS_PER_GROUP;
 
@@ -205,6 +207,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             }
             msgExt.setDelayTimeLevel(0);
         } else {
+            //这个 delayLevel 就是 Consumer 传过来的参数，并且它一直都是 0。所以，基于上面的代码，delayLevel 的值完全取决于当前 Message 的重试次数，即 ReconsumeTimes
             if (0 == delayLevel) {
                 delayLevel = 3 + msgExt.getReconsumeTimes();
             }
@@ -224,6 +227,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         msgInner.setBornTimestamp(msgExt.getBornTimestamp());
         msgInner.setBornHost(msgExt.getBornHost());
         msgInner.setStoreHost(msgExt.getStoreHost());
+        //对重试的次数进行累加
         msgInner.setReconsumeTimes(msgExt.getReconsumeTimes() + 1);
 
         String originMsgId = MessageAccessor.getOriginMessageId(msgExt);
@@ -279,6 +283,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         int queueIdInt = requestHeader.getQueueId();
         TopicConfig topicConfig = this.brokerController.getTopicConfigManager().selectTopicConfig(requestHeader.getTopic());
 
+        //queueIdInt < 0 显然是不合法的。如果遇到不合法的情况，就会从当前的 Topic 的 WriteQueue 中随机选择一个作为兜底
         if (queueIdInt < 0) {
             queueIdInt = randomQueueId(topicConfig.getWriteQueueNums());
         }
@@ -313,6 +318,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         }
 
         CompletableFuture<PutMessageResult> putMessageResult = null;
+        //会取出放在 Property 中的 PROPERTY_TRANSACTION_PREPARED 属性
         String transFlag = origProps.get(MessageConst.PROPERTY_TRANSACTION_PREPARED);
         if (Boolean.parseBoolean(transFlag)) {
             if (this.brokerController.getBrokerConfig().isRejectTransactionMessage()) {
@@ -322,8 +328,10 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                                 + "] sending transaction message is forbidden");
                 return CompletableFuture.completedFuture(response);
             }
+            //调用 TransactionalMessageService 的 asyncPrepareMessage() 方法来处理半事务消息
             putMessageResult = this.brokerController.getTransactionalMessageService().asyncPrepareMessage(msgInner);
         } else {
+            //MessageStore 是负责消息存储的核心组件，Message 的存、取都是由它来完成
             putMessageResult = this.brokerController.getMessageStore().asyncPutMessage(msgInner);
         }
         return handlePutMessageResultFuture(putMessageResult, response, request, msgInner, responseHeader, mqtraceContext, ctx, queueIdInt);

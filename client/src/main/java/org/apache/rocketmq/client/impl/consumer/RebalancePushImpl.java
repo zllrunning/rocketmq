@@ -149,6 +149,9 @@ public class RebalancePushImpl extends RebalanceImpl {
         return result;
     }
 
+    //无论使用的哪种 ConsumeFromWhere 枚举类型，
+    // 只要在 offsetTable 中有记录，则都会使用 Broker 记录的 Offset。
+    // !!!!!!只有在 offsetTable 没有记录时，才会按照枚举所表达的含义来消费。
     @Override
     public long computePullFromWhereWithException(MessageQueue mq) throws MQClientException {
         long result = -1;
@@ -159,6 +162,7 @@ public class RebalancePushImpl extends RebalanceImpl {
             case CONSUME_FROM_MIN_OFFSET:
             case CONSUME_FROM_MAX_OFFSET:
             case CONSUME_FROM_LAST_OFFSET: {
+                //READ_FROM_STORE代表会从远端（即 Broker）获取 offset
                 long lastOffset = offsetStore.readOffset(mq, ReadOffsetType.READ_FROM_STORE);
                 if (lastOffset >= 0) {
                     result = lastOffset;

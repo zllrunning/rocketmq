@@ -69,6 +69,7 @@ public abstract class AbstractTransactionalMessageCheckListener {
         String groupId = msgExt.getProperty(MessageConst.PROPERTY_PRODUCER_GROUP);
         Channel channel = brokerController.getProducerManager().getAvailableChannel(groupId);
         if (channel != null) {
+            //Broker 会向 Producer 发送一个 RequestCode 为 CHECK_TRANSACTION_STATE 的请求，顾名思义，通知 Producer，赶紧查查这条 Message 所对应的事务状态
             brokerController.getBroker2Client().checkProducerTransactionState(groupId, channel, checkTransactionStateRequestHeader, msgExt);
         } else {
             LOGGER.warn("Check transaction failed, channel is null. groupId={}", groupId);

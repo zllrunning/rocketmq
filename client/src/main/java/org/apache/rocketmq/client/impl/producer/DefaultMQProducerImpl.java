@@ -380,6 +380,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 doExecuteEndTransactionHook(msg, uniqueKey, brokerAddr, localTransactionState, true);
 
                 try {
+                    //这里 Producer 拿到事务的结果之后，会向 Broker 发送 RequestCode 为 END_TRANSACTION 的请求
+                    // 这是不是就跟前面讲的 Broker 处理 END_TRANSACTION 请求的逻辑串起来了？Broker 收到请求之后会根据不同的状态执行不同的操作
                     DefaultMQProducerImpl.this.mQClientFactory.getMQClientAPIImpl().endTransactionOneway(brokerAddr, thisHeader, remark,
                         3000);
                 } catch (Exception e) {
@@ -551,10 +553,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             MessageQueue mq = null;
             Exception exception = null;
             SendResult sendResult = null;
+            //同步模式发送的默认投递次数：3次 1（投递） + 2（重投）
             int timesTotal = communicationMode == CommunicationMode.SYNC ? 1 + this.defaultMQProducer.getRetryTimesWhenSendFailed() : 1;
             int times = 0;
             String[] brokersSent = new String[timesTotal];
             for (; times < timesTotal; times++) {
+                //首次投递lastBrokerName为null,第 2、3 次循环时 mq 才有值，而进行到了 2、3 次就说明首次投递失败，需要重新进行选择
                 String lastBrokerName = null == mq ? null : mq.getBrokerName();
                 MessageQueue mqSelected = this.selectOneMessageQueue(topicPublishInfo, lastBrokerName);
                 if (mqSelected != null) {
@@ -1226,6 +1230,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
 
         // ignore DelayTimeLevel parameter
+        //如果我们对 Message 设置了延迟等级，这里会直接使用 clearProperty() 将其清除掉，这是因为事务消息不支持延迟消息
         if (msg.getDelayTimeLevel() != 0) {
             MessageAccessor.clearProperty(msg, MessageConst.PROPERTY_DELAY_TIME_LEVEL);
         }
@@ -1233,6 +1238,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         Validators.checkMessage(msg, this.defaultMQProducer);
 
         SendResult sendResult = null;
+        //这里设置的 PROPERTY_TRANSACTION_PREPARED 即是标识事务消息的属性，这里设置为 true 即代表当前这条 Message 是 Half Message
         MessageAccessor.putProperty(msg, MessageConst.PROPERTY_TRANSACTION_PREPARED, "true");
         MessageAccessor.putProperty(msg, MessageConst.PROPERTY_PRODUCER_GROUP, this.defaultMQProducer.getProducerGroup());
         try {
@@ -1257,6 +1263,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         localTransactionState = localTransactionExecuter.executeLocalTransactionBranch(msg, arg);
                     } else if (transactionListener != null) {
                         log.debug("Used new transaction API");
+                        //设置了 transactionListener 的, 这里会通过 listener 来执行本地事务
                         localTransactionState = transactionListener.executeLocalTransaction(msg, arg);
                     }
                     if (null == localTransactionState) {
@@ -1284,6 +1291,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
 
         try {
+            //Producer 会向 Broker 发送一个 RequestCode 为 END_TRANSACTION 的请求，来通知 Broker 干活
+            //EndTransactionProcessor干活
             this.endTransaction(msg, sendResult, localTransactionState, localException);
         } catch (Exception e) {
             log.warn("local transaction execute " + localTransactionState + ", but end broker transaction failed", e);

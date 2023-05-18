@@ -286,6 +286,7 @@ public class BrokerOuterAPI {
                                 byte[] body = response.getBody();
                                 if (body != null) {
                                     nameServerDataVersion = DataVersion.decode(body, DataVersion.class);
+                                    //判断Broker 的 DataVersion 和NameServer 的是否一致
                                     if (!topicConfigWrapper.getDataVersion().equals(nameServerDataVersion)) {
                                         changed = true;
                                     }

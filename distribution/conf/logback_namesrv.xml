@@ -19,10 +19,10 @@
 <configuration>
     <appender name="DefaultAppender"
               class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${user.home}/logs/rocketmqlogs/namesrv_default.log</file>
+        <file>D://projects//gitrepo//rocketmqData//rocketmqnamesrv//logs//rocketmqlogsnamesrv_default.log</file>
         <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
-            <fileNamePattern>${user.home}/logs/rocketmqlogs/otherdays/namesrv_default.%i.log.gz</fileNamePattern>
+            <fileNamePattern>D://projects//gitrepo//rocketmqData//rocketmqnamesrv//logs//rocketmqlogsotherdays//namesrv_default.%i.log.gz</fileNamePattern>
             <minIndex>1</minIndex>
             <maxIndex>5</maxIndex>
         </rollingPolicy>
@@ -38,10 +38,10 @@
 
     <appender name="RocketmqNamesrvAppender_inner"
               class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${user.home}/logs/rocketmqlogs/namesrv.log</file>
+        <file>D://projects//gitrepo//rocketmqData//rocketmqnamesrv//logs//rocketmqlogsnamesrv.log</file>
         <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
-            <fileNamePattern>${user.home}/logs/rocketmqlogs/otherdays/namesrv.%i.log.gz</fileNamePattern>
+            <fileNamePattern>D://projects//gitrepo//rocketmqData//rocketmqnamesrv//logs//rocketmqlogsotherdays//namesrv.%i.log.gz</fileNamePattern>
             <minIndex>1</minIndex>
             <maxIndex>5</maxIndex>
         </rollingPolicy>
@@ -69,6 +69,7 @@
 
     <logger name="RocketmqNamesrv" additivity="false">
         <level value="INFO"/>
+        <appender-ref ref="STDOUT"/>
         <appender-ref ref="RocketmqNamesrvAppender"/>
     </logger>
 
