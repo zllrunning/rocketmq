@@ -84,7 +84,9 @@ import org.apache.rocketmq.remoting.common.RemotingHelper;
 import org.apache.rocketmq.remoting.exception.RemotingException;
 import org.apache.rocketmq.remoting.netty.NettyClientConfig;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
-
+//MQClientInstance 是 RocketMQ 客户端中的顶层类，
+// 大多数情况下，可以简单地理解为每个客户端对应类 MQClientInstance 的一个实例。
+// 这个实例维护着客户端的大部分状态信息，以及所有的 Producer、Consumer 和各种服务的实例
 public class MQClientInstance {
     private final static long LOCK_TIMEOUT_MILLIS = 3000;
     private final InternalLogger log = ClientLogger.getLog();
@@ -96,6 +98,8 @@ public class MQClientInstance {
     private final ConcurrentMap<String/* group */, MQConsumerInner> consumerTable = new ConcurrentHashMap<String, MQConsumerInner>();
     private final ConcurrentMap<String/* group */, MQAdminExtInner> adminExtTable = new ConcurrentHashMap<String, MQAdminExtInner>();
     private final NettyClientConfig nettyClientConfig;
+    //封装了客户端与 Broker 通信的方法
+    //这个类中封装了客户端服务端的 RPC，对调用者隐藏了真正网络通信部分的具体实现
     private final MQClientAPIImpl mQClientAPIImpl;
     private final MQAdminImpl mQAdminImpl;
     private final ConcurrentMap<String/* Topic */, TopicRouteData> topicRouteTable = new ConcurrentHashMap<String, TopicRouteData>();

@@ -195,9 +195,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 if (!this.defaultMQProducer.getProducerGroup().equals(MixAll.CLIENT_INNER_PRODUCER_GROUP)) {
                     this.defaultMQProducer.changeInstanceNameToPID();
                 }
-
+                //获取 MQClientInstance 的实例 mQClientFactory，没有则自动创建新的实例
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQProducer, rpcHook);
-
+                //在 mQClientFactory 中注册自己
                 boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
                 if (!registerOK) {
                     this.serviceState = ServiceState.CREATE_JUST;
@@ -207,7 +207,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 }
 
                 this.topicPublishInfoTable.put(this.defaultMQProducer.getCreateTopicKey(), new TopicPublishInfo());
-
+                //启动 mQClientFactory
                 if (startFactory) {
                     mQClientFactory.start();
                 }
@@ -226,7 +226,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             default:
                 break;
         }
-
+        // 给所有 Broker 发送心跳
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
 
         RequestFutureHolder.getInstance().startScheduledTask(this);
@@ -688,7 +688,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             return topicPublishInfo;
         }
     }
-
+    //主要功能就是构建发送消息的头 RequestHeader 和上下文 SendMessageContext，
+    // 然后调用方法 MQClientAPIImpl#sendMessage()，将消息发送给队列所在的 Broker
     private SendResult sendKernelImpl(final Message msg,
         final MessageQueue mq,
         final CommunicationMode communicationMode,
@@ -1124,7 +1125,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         long beginStartTime = System.currentTimeMillis();
         this.makeSureStateOK();
         Validators.checkMessage(msg, this.defaultMQProducer);
-
+        //1.选定要发送的队列
         TopicPublishInfo topicPublishInfo = this.tryToFindTopicPublishInfo(msg.getTopic());
         if (topicPublishInfo != null && topicPublishInfo.ok()) {
             MessageQueue mq = null;
@@ -1144,6 +1145,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             if (timeout < costTime) {
                 throw new RemotingTooMuchRequestException("sendSelectImpl call timeout");
             }
+            //2.调用方法 sendKernelImpl() 发送消息
             if (mq != null) {
                 return this.sendKernelImpl(msg, mq, communicationMode, sendCallback, null, timeout - costTime);
             } else {
@@ -1181,6 +1183,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         final SendCallback sendCallback, final long timeout)
         throws MQClientException, RemotingException, InterruptedException {
         final long beginStartTime = System.currentTimeMillis();
+        //使用 asyncSenderExecutor 的线程池，异步调用方法 sendSelectImpl()，继续发送消息的后续工作，
+        // 当前线程把发送任务提交给 asyncSenderExecutor 就可以返回了。
+        // 单向发送和同步发送的实现则是直接在当前线程中调用方法 sendSelectImpl()
         ExecutorService executor = this.getAsyncSenderExecutor();
         try {
             executor.submit(new Runnable() {

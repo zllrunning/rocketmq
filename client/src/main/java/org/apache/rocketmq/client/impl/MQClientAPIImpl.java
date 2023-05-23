@@ -181,7 +181,7 @@ public class MQClientAPIImpl {
     static {
         System.setProperty(RemotingCommand.REMOTING_VERSION_KEY, Integer.toString(MQVersion.CURRENT_VERSION));
     }
-
+    //RocketMQ 各进程之间网络通信的底层实现类
     private final RemotingClient remotingClient;
     private final TopAddressing topAddressing;
     private final ClientRemotingProcessor clientRemotingProcessor;

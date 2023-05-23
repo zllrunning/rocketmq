@@ -25,7 +25,13 @@ import org.apache.rocketmq.client.exception.RequestTimeoutException;
 import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.exception.RemotingException;
+/*
+* MQProducer 中，定义了 19 个不同参数的发消息的方法，按照发送方式不同可以分成三类：
 
+单向发送（Oneway）：发送消息后立即返回，不处理响应，不关心是否发送成功；
+同步发送（Sync）：发送消息后等待响应；
+异步发送（Async）：发送消息后立即返回，在提供的回调方法中处理响应。
+* */
 public interface MQProducer extends MQAdmin {
     void start() throws MQClientException;
 
