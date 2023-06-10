@@ -126,7 +126,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     public DefaultMQProducerImpl(final DefaultMQProducer defaultMQProducer, RPCHook rpcHook) {
         this.defaultMQProducer = defaultMQProducer;
         this.rpcHook = rpcHook;
-
+        //异步发送线程池任务队列：五万个
         this.asyncSenderThreadPoolQueue = new LinkedBlockingQueue<Runnable>(50000);
         this.defaultAsyncSenderExecutor = new ThreadPoolExecutor(
             Runtime.getRuntime().availableProcessors(),
@@ -187,15 +187,17 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
     public void start(final boolean startFactory) throws MQClientException {
         switch (this.serviceState) {
+            // 刚创建默认就是这个状态，还没有启动，所以启动时第一次会进到这里
             case CREATE_JUST:
+                //设置为启动失败状态
                 this.serviceState = ServiceState.START_FAILED;
-
+                //校验ProducerGroup
                 this.checkConfig();
 
                 if (!this.defaultMQProducer.getProducerGroup().equals(MixAll.CLIENT_INNER_PRODUCER_GROUP)) {
                     this.defaultMQProducer.changeInstanceNameToPID();
                 }
-                //获取 MQClientInstance 的实例 mQClientFactory，没有则自动创建新的实例
+                //获取 MQClientInstance 的实例 mQClientFactory，没有则自动创建新的实例，（封装了网络处理API，消息生产者、消费者和Namesrv、broker打交道的网络通道）
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQProducer, rpcHook);
                 //在 mQClientFactory 中注册自己
                 boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
@@ -214,6 +216,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
                 log.info("the producer [{}] start OK. sendMessageWithVIPChannel={}", this.defaultMQProducer.getProducerGroup(),
                     this.defaultMQProducer.isSendMessageWithVIPChannel());
+                //设置启动状态
                 this.serviceState = ServiceState.RUNNING;
                 break;
             case RUNNING:
@@ -228,7 +231,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
         // 给所有 Broker 发送心跳
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
-
+        // 定时扫描超时的异步请求
         RequestFutureHolder.getInstance().startScheduledTask(this);
 
     }
@@ -575,9 +578,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             callTimeout = true;
                             break;
                         }
-
+                        //发送
                         sendResult = this.sendKernelImpl(msg, mq, communicationMode, sendCallback, topicPublishInfo, timeout - costTime);
                         endTimestamp = System.currentTimeMillis();
+                        //isolation（隔离） 参数为false，异常情况为true
                         this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, false);
                         switch (communicationMode) {
                             case ASYNC:
@@ -673,6 +677,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     }
 
     private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
+        /**
+         * 第一次发送消息时，本地没有缓存topic的路由信息，查询
+         * NameServer尝试获取路由信息，如果路由信息未找到，再次尝试用默
+         * 认主题DefaultMQProducerImpl#createTopicKey去查询
+         */
         TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);
         if (null == topicPublishInfo || !topicPublishInfo.ok()) {
             this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo());
@@ -683,6 +692,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
             return topicPublishInfo;
         } else {
+            // isDefault 为true 其次，使用默认的topic从NameServer尝试获取路由信息
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
             topicPublishInfo = this.topicPublishInfoTable.get(topic);
             return topicPublishInfo;
@@ -833,6 +843,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             context,
                             this);
                         break;
+                    // ONEWAY也是使用的   下面 SYNC 的发送代码，不过到内部方法getMQClientAPIImpl().sendMessage()还会根据communicationMode细分
                     case ONEWAY:
                     case SYNC:
                         long costTimeSync = System.currentTimeMillis() - beginStartTime;

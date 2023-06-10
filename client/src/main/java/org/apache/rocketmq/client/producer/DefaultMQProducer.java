@@ -103,6 +103,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     /**
      * Compress message body threshold, namely, message body larger than 4k will be compressed on default.
      */
+    //当发送的消息内容大于这个数的时候 进行压缩，压缩阈值，默认是4k
     private int compressMsgBodyOverHowmuch = 1024 * 4;
 
     /**
@@ -122,11 +123,13 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     /**
      * Indicate whether to retry another broker on sending failure internally.
      */
+    //是否在内部发送失败时重试另一个broker
     private boolean retryAnotherBrokerWhenNotStoreOK = false;
 
     /**
      * Maximum allowed message body size in bytes.
      */
+    //允许发送消息最大大小 默认是4m
     private int maxMessageSize = 1024 * 1024 * 4; // 4M
 
     /**

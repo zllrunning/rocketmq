@@ -67,7 +67,8 @@ public class MQFaultStrategy {
                     if (latencyFaultTolerance.isAvailable(mq.getBrokerName()))
                         return mq;
                 }
-
+                //没有找到可用的broker
+                //从不可用的里面选择时延小的/距离可用时间最近的
                 final String notBestBroker = latencyFaultTolerance.pickOneAtLeast();
                 int writeQueueNums = tpInfo.getQueueIdByBroker(notBestBroker);
                 if (writeQueueNums > 0) {
@@ -91,13 +92,18 @@ public class MQFaultStrategy {
     }
 
     public void updateFaultItem(final String brokerName, final long currentLatency, boolean isolation) {
+        //默认为false，不开启
         if (this.sendLatencyFaultEnable) {
+            //isolation隔离为true的时候，时延为30000，这时不可用时间为600s
             long duration = computeNotAvailableDuration(isolation ? 30000 : currentLatency);
             this.latencyFaultTolerance.updateFaultItem(brokerName, currentLatency, duration);
         }
     }
 
     private long computeNotAvailableDuration(final long currentLatency) {
+        // latencyMax = {50L, 100L, 550L, 1000L, 2000L, 3000L, 15000L}
+        // notAvailableDuration = {0L, 0L, 30000L, 60000L, 120000L, 180000L, 600000L}
+        // 拿时延来计算不可用时间
         for (int i = latencyMax.length - 1; i >= 0; i--) {
             if (currentLatency >= latencyMax[i])
                 return this.notAvailableDuration[i];

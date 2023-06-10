@@ -219,11 +219,16 @@ public class MappedFile extends ReferenceResource {
         int currentPos = this.wrotePosition.get();
 
         if (currentPos < this.fileSize) {
+            // 这里是没有开启transientStorePool的，所以它是个空的，就会使用mappedByteBuffer
             ByteBuffer byteBuffer = writeBuffer != null ? writeBuffer.slice() : this.mappedByteBuffer.slice();
             byteBuffer.position(currentPos);
             AppendMessageResult result;
             if (messageExt instanceof MessageExtBrokerInner) {
                 //将 Message 追加到 Buffer 当中
+                // 参数1 mappedFile的起始offset，文件的第一个偏移量（就是MappedFile是从哪个地方开始的）
+                // 参数2 byteBuffer
+                // 参数3 剩余可写字节数
+                // 参数4 消息
                 result = cb.doAppend(this.getFileFromOffset(), byteBuffer, this.fileSize - currentPos,
                         (MessageExtBrokerInner) messageExt, putMessageContext);
             } else if (messageExt instanceof MessageExtBatch) {
@@ -418,13 +423,14 @@ public class MappedFile extends ReferenceResource {
 
         return null;
     }
-
+    //返回pos到可读的那一段的数据
     public SelectMappedBufferResult selectMappedBuffer(int pos) {
         int readPosition = getReadPosition();
         if (pos < readPosition && pos >= 0) {
             if (this.hold()) {
                 ByteBuffer byteBuffer = this.mappedByteBuffer.slice();
                 byteBuffer.position(pos);
+                //pos到可读的size
                 int size = readPosition - pos;
                 ByteBuffer byteBufferNew = byteBuffer.slice();
                 byteBufferNew.limit(size);

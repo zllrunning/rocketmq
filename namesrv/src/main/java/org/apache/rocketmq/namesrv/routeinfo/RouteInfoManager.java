@@ -54,10 +54,23 @@ public class RouteInfoManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_LOGGER_NAME);
     private final static long BROKER_CHANNEL_EXPIRED_TIME = 1000 * 60 * 2;
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
+    //topic -> queuedata  topic消息队列的路由信息，消息发送时根据路由表进行负载均衡
+    //key为Topic名称，value是一个QueueData实例列表。
+    // QueueData并不是一个Queue对应一个QueueData，而是一个Broker中该Topic的所有Queue对应一个QueueData
+    //简单来说，路由表的key为Topic名称，value则为所有涉及该Topic的BrokerName列表
     private final HashMap<String/* topic */, Map<String /* brokerName */ , QueueData>> topicQueueTable;
+    // broker名称 -> broker信息  Broker基础信息，包含brokerName、所属集群名称、主备Broker地址
+    //key为brokerName，value为BrokerData。一个Broker对应一个BrokerData实例，对吗？
+    // 不对。一套brokerName名称相同的Master-Slave小集群对应一个BrokerData。(brokerName相同说明是一个小的master-slave的broker小集群，brokerId区分集群内的broker)
+    // BrokerData中包含brokerName及一个map。该map的key为brokerId，
+    // value为该broker对应的地址。brokerId为0表示该broker为Master，非0表示Slave。
     private final HashMap<String/* brokerName */, BrokerData> brokerAddrTable;
+    //集群名字 -> broker名称 Broker集群信息，存储集群中所有Broker的名称
     private final HashMap<String/* clusterName */, Set<String/* brokerName */>> clusterAddrTable;
+    //broker地址-> broker活跃信息  Broker状态信息，NameServer每次收到心跳包时会替换该信息。
     private final HashMap<String/* brokerAddr */, BrokerLiveInfo> brokerLiveTable;
+    //broker地址 -> 一堆过滤器 Broker上的FilterServer列表，用于类模式消息过滤。
+    //  类模式过滤机制在4.4及以后版本被废弃
     private final HashMap<String/* brokerAddr */, List<String>/* Filter Server */> filterServerTable;
 
     public RouteInfoManager() {
@@ -420,13 +433,14 @@ public class RouteInfoManager {
         try {
             try {
                 this.lock.readLock().lockInterruptibly();
+                //HashMap<String/* topic */, Map<String /* brokerName */ , QueueData>> topicQueueTable
                 Map<String, QueueData> queueDataMap = this.topicQueueTable.get(topic);
                 if (queueDataMap != null) {
                     topicRouteData.setQueueDatas(new ArrayList<>(queueDataMap.values()));
                     foundQueueData = true;
-
+                    //key就是brokerName
                     brokerNameSet.addAll(queueDataMap.keySet());
-
+                    //再根据broker name 取broker地址列表中 获取broker信息
                     for (String brokerName : brokerNameSet) {
                         BrokerData brokerData = this.brokerAddrTable.get(brokerName);
                         if (null != brokerData) {
@@ -474,8 +488,10 @@ public class RouteInfoManager {
             //看上次某个 Broker 的心跳时间是否超过了 120 秒
             if ((last + BROKER_CHANNEL_EXPIRED_TIME) < System.currentTimeMillis()) {
                 RemotingUtil.closeChannel(next.getValue().getChannel());
+                //移除
                 it.remove();
                 log.warn("The broker channel expired, {} {}ms", next.getKey(), BROKER_CHANNEL_EXPIRED_TIME);
+                //会移除过期broker相关的其他hashmap的数据
                 this.onChannelDestroy(next.getKey(), next.getValue().getChannel());
 
                 removeCount++;

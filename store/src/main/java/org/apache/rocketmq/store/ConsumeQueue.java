@@ -409,6 +409,7 @@ public class ConsumeQueue {
     public void putMessagePositionInfoWrapper(DispatchRequest request, boolean multiQueue) {
         final int maxRetries = 30;
         boolean canWrite = this.defaultMessageStore.getRunningFlags().isCQWriteable();
+        // 可以重试30次
         for (int i = 0; i < maxRetries && canWrite; i++) {
             long tagsCode = request.getTagsCode();
             if (isExtWriteEnable()) {
@@ -425,6 +426,7 @@ public class ConsumeQueue {
                         topic, queueId, request.getCommitLogOffset());
                 }
             }
+            //写入 consumequeue文件
             boolean result = this.putMessagePositionInfo(request.getCommitLogOffset(),
                 request.getMsgSize(), tagsCode, request.getConsumeQueueOffset());
             if (result) {
@@ -507,13 +509,17 @@ public class ConsumeQueue {
             log.warn("Maybe try to build consume queue repeatedly maxPhysicOffset={} phyOffset={}", maxPhysicOffset, offset);
             return true;
         }
-
+        // 依次将消息偏移量、消息长度、tag哈希码写入ByteBuffer，
+        // 并根据consumeQueueOffset计算ConsumeQueue中的物理地址，将内容追加到ConsumeQueue的内存映射文件中（本操作只追加，不刷盘），
+        // ConsumeQueue的刷盘方式固定为异步刷盘
         this.byteBufferIndex.flip();
         this.byteBufferIndex.limit(CQ_STORE_UNIT_SIZE);
+        // ConsumeQueue 每一个条目都是 20个字节（8个字节commitlog偏移量+4字节消息长度+8字节tag的hashcode
         this.byteBufferIndex.putLong(offset);
         this.byteBufferIndex.putInt(size);
         this.byteBufferIndex.putLong(tagsCode);
 
+        // 根据 consumeQueue offset 计算在 ConsumeQueue 的位置
         final long expectLogicOffset = cqOffset * CQ_STORE_UNIT_SIZE;
 
         MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile(expectLogicOffset);
@@ -529,14 +535,17 @@ public class ConsumeQueue {
             }
 
             if (cqOffset != 0) {
+                // 当前在这个consumeQueue 的offset
                 long currentLogicOffset = mappedFile.getWrotePosition() + mappedFile.getFileFromOffset();
 
+                // 你现在要插入offset 比当前在这个consumeQueue 的offset要小，这个就是说明 你在找之前的位置插入，但是人家已经有东西了
+                // 要是让你插入的话 就会造成重复，所以这里不让你插入的
                 if (expectLogicOffset < currentLogicOffset) {
                     log.warn("Build  consume queue repeatedly, expectLogicOffset: {} currentLogicOffset: {} Topic: {} QID: {} Diff: {}",
                         expectLogicOffset, currentLogicOffset, this.topic, this.queueId, expectLogicOffset - currentLogicOffset);
                     return true;
                 }
-
+                //按照正常情况下是一样大的，不一样大打印错误日志
                 if (expectLogicOffset != currentLogicOffset) {
                     LOG_ERROR.warn(
                         "[BUG]logic queue order maybe wrong, expectLogicOffset: {} currentLogicOffset: {} Topic: {} QID: {} Diff: {}",
@@ -549,6 +558,7 @@ public class ConsumeQueue {
                 }
             }
             this.maxPhysicOffset = offset + size;
+            // 追加
             return mappedFile.appendMessage(this.byteBufferIndex.array());
         }
         return false;
@@ -572,6 +582,7 @@ public class ConsumeQueue {
         if (offset >= this.getMinLogicOffset()) {
             MappedFile mappedFile = this.mappedFileQueue.findMappedFileByOffset(offset);
             if (mappedFile != null) {
+                //返回传进去的参数到可读的那一段的数据
                 return mappedFile.selectMappedBuffer((int) (offset % mappedFileSize));
             }
         }

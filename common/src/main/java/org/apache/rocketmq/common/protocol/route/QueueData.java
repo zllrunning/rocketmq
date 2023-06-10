@@ -19,7 +19,8 @@
  * $Id: QueueData.java 1835 2013-05-16 02:00:50Z vintagewang@apache.org $
  */
 package org.apache.rocketmq.common.protocol.route;
-
+//QueueData并不是一个Queue对应一个QueueData，而是一个Broker中该Topic的所有Queue对应一个
+//QueueData。即，只要涉及到该Topic的Broker，一个Broker对应一个QueueData
 public class QueueData implements Comparable<QueueData> {
     private String brokerName;
     private int readQueueNums;

@@ -24,7 +24,9 @@ import org.apache.rocketmq.store.MessageFilter;
 public class PullRequest {
     private final RemotingCommand requestCommand;
     private final Channel clientChannel;
+    //超时时长
     private final long timeoutMillis;
+    //挂起开始时间戳,如果当前系统>=(timeoutMills+suspendTimestamp)表示已超时
     private final long suspendTimestamp;
     private final long pullFromThisOffset;
     private final SubscriptionData subscriptionData;

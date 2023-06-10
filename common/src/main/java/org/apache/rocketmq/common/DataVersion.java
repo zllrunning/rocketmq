@@ -49,6 +49,7 @@ public class DataVersion extends RemotingSerializable {
         this.counter = counter;
     }
 
+    //只有当timestamp与counter都相等时，两个DataVersion对象才相等
     @Override
     public boolean equals(final Object o) {
         if (this == o)

@@ -46,10 +46,12 @@ public class ClientConfig {
     /**
      * Pulling topic information interval from the named server
      */
+    //多久去nameserv 获取topic 信息，默认是30s
     private int pollNameServerInterval = 1000 * 30;
     /**
      * Heartbeat interval in microseconds with message broker
      */
+    //每隔30向broker发送心跳
     private int heartbeatBrokerInterval = 1000 * 30;
     /**
      * Offset persistent interval for consumer

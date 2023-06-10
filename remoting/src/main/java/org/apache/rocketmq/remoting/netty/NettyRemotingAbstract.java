@@ -71,7 +71,12 @@ public abstract class NettyRemotingAbstract {
 
     /**
      * This map caches all on-going requests.
+     * 1.NettyRemotingClient的start()方法启动一个定时任务扫描responseTable    这个scanResponseTable();这个是remove timeout request
+     * 2.NettyClientHandler processMessageReceived->processResponseCommand 处理正常返回的情况
+     * NettyRemotingAbstract#processResponseCommand(io.netty.channel.ChannelHandlerContext, org.apache.rocketmq.remoting.protocol.RemotingCommand)
+     *
      */
+
     protected final ConcurrentMap<Integer /* opaque */, ResponseFuture> responseTable =
         new ConcurrentHashMap<Integer, ResponseFuture>(256);
 
@@ -79,6 +84,7 @@ public abstract class NettyRemotingAbstract {
      * This container holds all processors per request code, aka, for each incoming request, we may look up the
      * responding processor in this map to handle the request.
      */
+    //BrokerController的初始化方法initialize会调用 BrokerController#registerProcessor，Processor的注册操作就在这个方法里
     protected final HashMap<Integer/* request code */, Pair<NettyRequestProcessor, ExecutorService>> processorTable =
         new HashMap<Integer, Pair<NettyRequestProcessor, ExecutorService>>(64);
 
@@ -190,7 +196,9 @@ public abstract class NettyRemotingAbstract {
      * @param cmd request command.
      */
     public void processRequestCommand(final ChannelHandlerContext ctx, final RemotingCommand cmd) {
+        // 根据 code 从 processorTable 获取 Pair
         final Pair<NettyRequestProcessor, ExecutorService> matched = this.processorTable.get(cmd.getCode());
+        //找不到默认值 就用默认的
         final Pair<NettyRequestProcessor, ExecutorService> pair = null == matched ? this.defaultRequestProcessor : matched;
         final int opaque = cmd.getOpaque();
 
@@ -227,6 +235,7 @@ public abstract class NettyRemotingAbstract {
                             processor.asyncProcessRequest(ctx, cmd, callback);
                         } else {
                             NettyRequestProcessor processor = pair.getObject1();
+                            //进入processor（如DefaultRequestProcessor）#processRequest方法
                             RemotingCommand response = processor.processRequest(ctx, cmd);
                             callback.callback(response);
                         }
@@ -251,9 +260,10 @@ public abstract class NettyRemotingAbstract {
                 ctx.writeAndFlush(response);
                 return;
             }
-
+            //处理操作封装为Runnable对象，接着把Runnable对象提交到线程池中
             try {
                 final RequestTask requestTask = new RequestTask(run, ctx.channel(), cmd);
+                //pair.getObject2()拿到的就是NamesrvController.remotingExecutor
                 pair.getObject2().submit(requestTask);
             } catch (RejectedExecutionException e) {
                 if ((System.currentTimeMillis() % 10000) == 0) {
@@ -453,6 +463,7 @@ public abstract class NettyRemotingAbstract {
         throws InterruptedException, RemotingTooMuchRequestException, RemotingTimeoutException, RemotingSendRequestException {
         long beginStartTime = System.currentTimeMillis();
         final int opaque = request.getOpaque();
+        //semaphore的permits默认65535，限流
         boolean acquired = this.semaphoreAsync.tryAcquire(timeoutMillis, TimeUnit.MILLISECONDS);
         if (acquired) {
             final SemaphoreReleaseOnlyOnce once = new SemaphoreReleaseOnlyOnce(this.semaphoreAsync);
@@ -532,6 +543,7 @@ public abstract class NettyRemotingAbstract {
     public void invokeOnewayImpl(final Channel channel, final RemotingCommand request, final long timeoutMillis)
         throws InterruptedException, RemotingTooMuchRequestException, RemotingTimeoutException, RemotingSendRequestException {
         request.markOnewayRPC();
+        //oneway的semaphore默认65535，控制控制并发，async模式类似，sync模式没有
         boolean acquired = this.semaphoreOneway.tryAcquire(timeoutMillis, TimeUnit.MILLISECONDS);
         if (acquired) {
             final SemaphoreReleaseOnlyOnce once = new SemaphoreReleaseOnlyOnce(this.semaphoreOneway);

@@ -167,7 +167,9 @@ public class DefaultMessageStore implements MessageStore {
         this.indexService.start();
 
         this.dispatcherList = new LinkedList<>();
+        // 写入 ConsumeQueue 文件
         this.dispatcherList.addLast(new CommitLogDispatcherBuildConsumeQueue());
+        // 写入 Index 文件
         this.dispatcherList.addLast(new CommitLogDispatcherBuildIndex());
 
         File file = new File(StorePathConfigHelper.getLockFile(messageStoreConfig.getStorePathRootDir()));
@@ -249,6 +251,7 @@ public class DefaultMessageStore implements MessageStore {
              * 3. Calculate the reput offset according to the consume queue;
              * 4. Make sure the fall-behind messages to be dispatched before starting the commitlog, especially when the broker role are automatically changed.
              */
+            //maxPhysicalPosInLogicQueue 分发commitlog消息的偏移量
             long maxPhysicalPosInLogicQueue = commitLog.getMinOffset();
             for (ConcurrentMap<Integer, ConsumeQueue> maps : this.consumeQueueTable.values()) {
                 for (ConsumeQueue logic : maps.values()) {
@@ -275,6 +278,7 @@ public class DefaultMessageStore implements MessageStore {
             log.info("[SetReputOffset] maxPhysicalPosInLogicQueue={} clMinOffset={} clMaxOffset={} clConfirmedOffset={}",
                 maxPhysicalPosInLogicQueue, this.commitLog.getMinOffset(), this.commitLog.getMaxOffset(), this.commitLog.getConfirmOffset());
             this.reputMessageService.setReputFromOffset(maxPhysicalPosInLogicQueue);
+            //启动reputMessageService
             this.reputMessageService.start();
 
             /**
@@ -560,6 +564,7 @@ public class DefaultMessageStore implements MessageStore {
         return commitLog;
     }
 
+    //获取message，获取的是一批数据，批的大小由maxMsgNums和实际consumeQueue有多少没被消费的消息共同决定的
     public GetMessageResult getMessage(final String group, final String topic, final int queueId, final long offset,
         final int maxMsgNums,
         final MessageFilter messageFilter) {
@@ -589,7 +594,7 @@ public class DefaultMessageStore implements MessageStore {
         GetMessageResult getResult = null;
 
         final long maxOffsetPy = this.commitLog.getMaxOffset();
-
+        //根据topic与queueId一个ConsumeQueue，consumeQueue记录的是消息在commitLog的位置
         ConsumeQueue consumeQueue = findConsumeQueue(topic, queueId);
         if (consumeQueue != null) {
             minOffset = consumeQueue.getMinOffsetInQueue();
@@ -608,6 +613,7 @@ public class DefaultMessageStore implements MessageStore {
                 status = GetMessageStatus.OFFSET_OVERFLOW_BADLY;
                 nextBeginOffset = nextOffsetCorrection(offset, maxOffset);
             } else {
+                // 从 consumerQueue 文件中获取消息（又是一段消息集合）
                 SelectMappedBufferResult bufferConsumeQueue = consumeQueue.getIndexBuffer(offset);
                 if (bufferConsumeQueue != null) {
                     try {
@@ -617,15 +623,21 @@ public class DefaultMessageStore implements MessageStore {
                         long maxPhyOffsetPulling = 0;
 
                         int i = 0;
+                        //传进来的每批获取消息的最大批数量
                         final int maxFilterMessageCount = Math.max(16000, maxMsgNums * ConsumeQueue.CQ_STORE_UNIT_SIZE);
                         final boolean diskFallRecorded = this.messageStoreConfig.isDiskFallRecorded();
 
                         getResult = new GetMessageResult(maxMsgNums);
 
                         ConsumeQueueExt.CqExtUnit cqExtUnit = new ConsumeQueueExt.CqExtUnit();
+                        //循环遍历取到的这一段消息，i每次加CQ_STORE_UNIT_SIZE（20），也就是一个consumeQueue元素的大小
+                        //8个字节commitlog偏移量+4字节消息长度+8字节tag的hashcode
                         for (; i < bufferConsumeQueue.getSize() && i < maxFilterMessageCount; i += ConsumeQueue.CQ_STORE_UNIT_SIZE) {
+                            //commitlog偏移量
                             long offsetPy = bufferConsumeQueue.getByteBuffer().getLong();
+                            //4字节消息长度
                             int sizePy = bufferConsumeQueue.getByteBuffer().getInt();
+                            //8字节tag的hashcode
                             long tagsCode = bufferConsumeQueue.getByteBuffer().getLong();
 
                             maxPhyOffsetPulling = offsetPy;
@@ -663,7 +675,7 @@ public class DefaultMessageStore implements MessageStore {
 
                                 continue;
                             }
-
+                            //从 commitLong 获取消息
                             SelectMappedBufferResult selectResult = this.commitLog.getMessage(offsetPy, sizePy);
                             if (null == selectResult) {
                                 if (getResult.getBufferTotalSize() == 0) {
@@ -685,6 +697,7 @@ public class DefaultMessageStore implements MessageStore {
                             }
 
                             this.storeStatsService.getGetMessageTransferedMsgCount().add(1);
+                            //找到的消息放进去
                             getResult.addMessage(selectResult);
                             status = GetMessageStatus.FOUND;
                             nextPhyFileStartOffset = Long.MIN_VALUE;
@@ -694,7 +707,7 @@ public class DefaultMessageStore implements MessageStore {
                             long fallBehind = maxOffsetPy - maxPhyOffsetPulling;
                             brokerStatsManager.recordDiskFallBehindSize(group, topic, queueId, fallBehind);
                         }
-
+                        //本次的offset加上本次获取的消息数量
                         nextBeginOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
 
                         long diff = maxOffsetPy - maxPhyOffsetPulling;
@@ -731,6 +744,7 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         getResult.setStatus(status);
+        //下次获取message的offset
         getResult.setNextBeginOffset(nextBeginOffset);
         getResult.setMaxOffset(maxOffset);
         getResult.setMinOffset(minOffset);
@@ -1237,7 +1251,14 @@ public class DefaultMessageStore implements MessageStore {
         return null;
     }
 
+    /**
+     * 根据消息主题与队列ID，先获取对应的ConsumeQueue文件
+     *
+     * -topic
+     *   --queue
+     */
     public ConsumeQueue findConsumeQueue(String topic, int queueId) {
+        // 获取topic 对应的queues
         ConcurrentMap<Integer, ConsumeQueue> map = consumeQueueTable.get(topic);
         if (null == map) {
             ConcurrentMap<Integer, ConsumeQueue> newMap = new ConcurrentHashMap<Integer, ConsumeQueue>(128);
@@ -1248,7 +1269,7 @@ public class DefaultMessageStore implements MessageStore {
                 map = newMap;
             }
         }
-
+        //根据queueId获取对应的queue对应的ConsumeQueue
         ConsumeQueue logic = map.get(queueId);
         if (null == logic) {
             ConsumeQueue newLogic = new ConsumeQueue(
@@ -1539,13 +1560,17 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     public void doDispatch(DispatchRequest req) {
+        // dispatcherList：CommitLogDispatcherBuildConsumeQueue CommitLogDispatcherBuildIndex
+        //需要注意的是，在这两个文件中，写入的仅是消息的位置信息，完整的消息内容仅在commitLog中保存
         for (CommitLogDispatcher dispatcher : this.dispatcherList) {
             dispatcher.dispatch(req);
         }
     }
 
     public void putMessagePositionInfo(DispatchRequest dispatchRequest) {
+        // 根据消息主题与队列ID，先获取对应的ConsumeQueue文件
         ConsumeQueue cq = this.findConsumeQueue(dispatchRequest.getTopic(), dispatchRequest.getQueueId());
+        // 将内容追加到consumeQueue的内存映射文件中
         cq.putMessagePositionInfoWrapper(dispatchRequest, checkMultiDispatchQueue(dispatchRequest));
     }
 
@@ -1645,8 +1670,10 @@ public class DefaultMessageStore implements MessageStore {
             switch (tranType) {
                 case MessageSysFlag.TRANSACTION_NOT_TYPE:
                 case MessageSysFlag.TRANSACTION_COMMIT_TYPE:
+                    // 将消息在commitLog文件的位置、tags等信息写入ConsumerQueue文件
                     DefaultMessageStore.this.putMessagePositionInfo(request);
                     break;
+                // 如果事务还没有提交 或者 回滚了 就不需要写入consumerQueue
                 case MessageSysFlag.TRANSACTION_PREPARED_TYPE:
                 case MessageSysFlag.TRANSACTION_ROLLBACK_TYPE:
                     break;
@@ -1991,6 +2018,8 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    //运行中，发送端发送消息到 commitlog文件，此时如何及时传达到 consume文件、Index文件呢
+    //RocketMQ 采用专门下面这个线程来根据 comitlog offset 来将 commitlog 转发给ConsumeQueue、Index
     class ReputMessageService extends ServiceThread {
 
         private volatile long reputFromOffset = 0;
@@ -2040,24 +2069,29 @@ public class DefaultMessageStore implements MessageStore {
                     && this.reputFromOffset >= DefaultMessageStore.this.getConfirmOffset()) {
                     break;
                 }
-
+                //根据 offset 从 commitlog 获取消息，获取的其实是一段消息，是从offset所处的那个mappedFile文件中（pos到可读）的一段消息
                 SelectMappedBufferResult result = DefaultMessageStore.this.commitLog.getData(reputFromOffset);
                 if (result != null) {
                     try {
                         this.reputFromOffset = result.getStartOffset();
-
+                        // 循环一个一个处理result读取的一批消息
                         for (int readSize = 0; readSize < result.getSize() && doNext; ) {
+                            //尝试构建转发请求对象 DispatchRequest，主要是从Nio ByteBuffer中，根据 commitlog 消息存储格式，解析出消息的核心属性
                             DispatchRequest dispatchRequest =
                                 DefaultMessageStore.this.commitLog.checkMessageAndReturnSize(result.getByteBuffer(), false, false);
                             int size = dispatchRequest.getBufferSize() == -1 ? dispatchRequest.getMsgSize() : dispatchRequest.getBufferSize();
 
                             if (dispatchRequest.isSuccess()) {
                                 if (size > 0) {
+                                    //根据 comitlog 文件内容实时构建 consumequeue、index文件的关键所在
+                                    //https://blog.csdn.net/prestigeding/article/details/79156276
                                     DefaultMessageStore.this.doDispatch(dispatchRequest);
-
+                                    //如果开启了长轮询并且角色为主节点，则通知有新消息到达，执行一次 pullRequest 验证。
+                                    //NotifyMessageArrivingListener 代码，最终调用 pullRequestHoldService 的 notifyMessageArriving 方法，进行一次消息拉取
                                     if (BrokerRole.SLAVE != DefaultMessageStore.this.getMessageStoreConfig().getBrokerRole()
                                             && DefaultMessageStore.this.brokerConfig.isLongPollingEnable()
                                             && DefaultMessageStore.this.messageArrivingListener != null) {
+                                        // 在这里会把消息主动投递到consumer
                                         DefaultMessageStore.this.messageArrivingListener.arriving(dispatchRequest.getTopic(),
                                             dispatchRequest.getQueueId(), dispatchRequest.getConsumeQueueOffset() + 1,
                                             dispatchRequest.getTagsCode(), dispatchRequest.getStoreTimestamp(),
@@ -2139,6 +2173,7 @@ public class DefaultMessageStore implements MessageStore {
 
             while (!this.isStopped()) {
                 try {
+                    //每执行完一次业务方法 doReput，休息1毫秒，就继续抢占CPU，再次执行 doReput 方法
                     Thread.sleep(1);
                     this.doReput();
                 } catch (Exception e) {

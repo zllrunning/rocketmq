@@ -277,6 +277,7 @@ public class MQClientInstance {
             @Override
             public void run() {
                 try {
+                    //从namesrv上面更新topic的路由信息,默认30s
                     MQClientInstance.this.updateTopicRouteInfoFromNameServer();
                 } catch (Exception e) {
                     log.error("ScheduledTask updateTopicRouteInfoFromNameServer exception", e);
@@ -359,7 +360,7 @@ public class MQClientInstance {
                 }
             }
         }
-
+        //逐个topic更新
         for (String topic : topicList) {
             this.updateTopicRouteInfoFromNameServer(topic);
         }
@@ -560,6 +561,7 @@ public class MQClientInstance {
                             }
 
                             try {
+                                //向broker发送心跳
                                 int version = this.mQClientAPIImpl.sendHeartbeat(addr, heartbeatData, clientConfig.getMqClientApiTimeout());
                                 if (!this.brokerVersionTable.containsKey(brokerName)) {
                                     this.brokerVersionTable.put(brokerName, new HashMap<String, Integer>(4));
@@ -625,12 +627,15 @@ public class MQClientInstance {
                             }
                         }
                     } else {
+                        //从namesrv获取topicRouteData数据
                         topicRouteData = this.mQClientAPIImpl.getTopicRouteInfoFromNameServer(topic, clientConfig.getMqClientApiTimeout());
                     }
                     if (topicRouteData != null) {
                         TopicRouteData old = this.topicRouteTable.get(topic);
                         boolean changed = topicRouteDataIsChange(old, topicRouteData);
                         if (!changed) {
+                            //调用isNeedUpdateTopicRouteInfo 方法再判断一下需要更新，
+                            // 这个方法其实就是遍历所有的producer 或者是consumer，然后看看他们的topic table里面是不是都有这个topic 没有的话就需要更新下。
                             changed = this.isNeedUpdateTopicRouteInfo(topic);
                         } else {
                             log.info("the topic[{}] route info changed, old[{}] ,new[{}]", topic, old, topicRouteData);
@@ -645,6 +650,7 @@ public class MQClientInstance {
 
                             // Update Pub info
                             if (!producerTable.isEmpty()) {
+                                // 将topic 路由信息转成topic publish 信息 提供给消息发送者发送消息使用
                                 TopicPublishInfo publishInfo = topicRouteData2TopicPublishInfo(topic, topicRouteData);
                                 publishInfo.setHaveTopicRouterInfo(true);
                                 Iterator<Entry<String, MQProducerInner>> it = this.producerTable.entrySet().iterator();
@@ -670,6 +676,7 @@ public class MQClientInstance {
                                 }
                             }
                             log.info("topicRouteTable.put. Topic = {}, TopicRouteData[{}]", topic, cloneTopicRouteData);
+                            //添加到route表中
                             this.topicRouteTable.put(topic, cloneTopicRouteData);
                             return true;
                         }

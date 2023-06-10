@@ -94,6 +94,7 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
             case RequestCode.DELETE_KV_CONFIG:
                 return this.deleteKVConfig(ctx, request);
             case RequestCode.QUERY_DATA_VERSION:
+                //在broker注册到nameServer前，会先发一个code为QUERY_DATA_VERSION的消息，判断版本号是否有变化再决定是否进行注册
                 return queryBrokerTopicConfig(ctx, request);
             //    Broker 注册自己到 NameServer 并且会定时地发送心跳，心跳带着数据更新broker的信息
             case RequestCode.REGISTER_BROKER:
@@ -276,8 +277,11 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
 
         Boolean changed = this.namesrvController.getRouteInfoManager().isBrokerTopicConfigChanged(requestHeader.getBrokerAddr(), dataVersion);
         if (!changed) {
+            //如果没改变，就更新最后一次的上报时间为当前时间
             this.namesrvController.getRouteInfoManager().updateBrokerInfoUpdateTimestamp(requestHeader.getBrokerAddr(), System.currentTimeMillis());
         }
+        //那么当DataVersion发生变化时，就不会更新BrokerLiveInfo#lastUpdateTimestamp的值了吗？
+        // 并不是，如果DataVersion发生了变化，就表明broker需要再次注册，BrokerLiveInfo#lastUpdateTimestamp会在注册请求里被改变了。
 
         DataVersion nameSeverDataVersion = this.namesrvController.getRouteInfoManager().queryBrokerTopicConfig(requestHeader.getBrokerAddr());
         response.setCode(ResponseCode.SUCCESS);
@@ -360,6 +364,7 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
         TopicRouteData topicRouteData = this.namesrvController.getRouteInfoManager().pickupTopicRouteData(requestHeader.getTopic());
 
         if (topicRouteData != null) {
+            // 是否支持顺序消费 默认false
             if (this.namesrvController.getNamesrvConfig().isOrderMessageEnable()) {
                 String orderTopicConf =
                     this.namesrvController.getKvConfigManager().getKVConfig(NamesrvUtil.NAMESPACE_ORDER_TOPIC_CONFIG,
@@ -370,13 +375,14 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
             byte[] content;
             Boolean standardJsonOnly = requestHeader.getAcceptStandardJsonOnly();
             if (request.getVersion() >= Version.V4_9_4.ordinal() || (null != standardJsonOnly && standardJsonOnly)) {
+                //序列化json
                 content = topicRouteData.encode(SerializerFeature.BrowserCompatible,
                     SerializerFeature.QuoteFieldNames, SerializerFeature.SkipTransientField,
                     SerializerFeature.MapSortField);
             } else {
                 content = RemotingSerializable.encode(topicRouteData);
             }
-
+            // 组装响应并返回
             response.setBody(content);
             response.setCode(ResponseCode.SUCCESS);
             response.setRemark(null);

@@ -541,9 +541,11 @@ public class BrokerController {
         }
     }
 
+    //会向NettyRemotingAbstract.processorTable注册
     public void registerProcessor() {
         /**
          * SendMessageProcessor
+         * 消息接收（接收producer的消息）处理类
          */
         SendMessageProcessor sendProcessor = new SendMessageProcessor(this);
         sendProcessor.registerSendMessageHook(sendMessageHookList);
@@ -559,6 +561,7 @@ public class BrokerController {
         this.fastRemotingServer.registerProcessor(RequestCode.CONSUMER_SEND_MSG_BACK, sendProcessor, this.sendMessageExecutor);
         /**
          * PullMessageProcessor
+         * 负责消息投递
          */
         this.remotingServer.registerProcessor(RequestCode.PULL_MESSAGE, this.pullMessageProcessor, this.pullMessageExecutor);
         this.pullMessageProcessor.registerConsumeMessageHook(consumeMessageHookList);
@@ -773,7 +776,7 @@ public class BrokerController {
             this.scheduledExecutorService.awaitTermination(5000, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
         }
-
+        //发送注销消息到NameServer，循环遍历namesrv执行unregisterBroker
         this.unregisterBrokerAll();
 
         if (this.sendMessageExecutor != null) {
@@ -852,9 +855,10 @@ public class BrokerController {
 
     public void start() throws Exception {
         if (this.messageStore != null) {
+            //启动reputMessageService
             this.messageStore.start();
         }
-
+        //启动 remotingServer，其实就是启动一个netty服务，用来接收producer传来的消息
         if (this.remotingServer != null) {
             this.remotingServer.start();
         }
@@ -871,6 +875,7 @@ public class BrokerController {
             this.brokerOuterAPI.start();
         }
 
+        //处理挂起的拉取请求
         if (this.pullRequestHoldService != null) {
             this.pullRequestHoldService.start();
         }
@@ -952,7 +957,21 @@ public class BrokerController {
 
         //当 forceRegister 为 false 时，只有 needRegister() 方法判定为 true 时，才会执行注册逻辑。
         // 这里的判断逻辑实际上很简单粗暴，Broker 会去请求所有的 NameServer，查询自己传给 NameServer 的数据，然后跟自己本地的数据版本做一个对比
-        //只要有任何一台 NameServer 的数据是旧的，Broker 就会重新执行心跳，换句话说：needRegister() 的判定就会为 true
+        //只要有任何一台 NameServer 的数据是旧的，Broker 就会重新执行心跳（RequestCode.REGISTER_BROKER），换句话说：needRegister() 的判定就会为 true
+
+        // 发送心跳（RequestCode.REGISTER_BROKER）前会先判断是否需要发送，needRegister方法会向各个namesrv发送一个QUERY_DATA_VERSION请求（会带着当前DATA_VERSION），
+        // 逐个对比返回的DATA_VERSION和当前的DATA_VERSION是否相等，不相等才会发送心跳（RequestCode.REGISTER_BROKER）
+        // 那另一个问题来了，时间久了不发送心跳（RequestCode.REGISTER_BROKER），namesrv不就认为broker挂了吗？
+        // 其实QUERY_DATA_VERSION请求在到达namesrv后，namesrv会判断版本变了没，如果没变那就更新当前时间为最后一次心跳时间
+        // 那这么来看QUERY_DATA_VERSION请求其实也是在发送心跳
+        // 总结来讲，心跳包括两种请求：
+        //1. RequestCode.REGISTER_BROKER
+        //2. RequestCode.QUERY_DATA_VERSION
+
+        //从DataVersion的equals()方法来看，只有当timestamp与counter都相等时，两个DataVersion对象才相等。
+        // 那这两个值会在哪里被修改呢？从DataVersion#nextVersion方法的调用情况来看，引起这两个值的变化主要有两种：
+        //broker 上新创建了一个 topic
+        //topic的发了的变化
         if (forceRegister || needRegister(this.brokerConfig.getBrokerClusterName(),
             this.getBrokerAddr(),
             this.brokerConfig.getBrokerName(),

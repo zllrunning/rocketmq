@@ -205,6 +205,8 @@ public class IndexService {
             DispatchRequest msg = req;
             String topic = msg.getTopic();
             String keys = msg.getKeys();
+            // 如果该消息的物理偏移量小于Index文件中的物理偏移量，则说明
+            //是重复数据，忽略本次索引构建
             if (msg.getCommitLogOffset() < endPhyOffset) {
                 return;
             }
@@ -218,7 +220,7 @@ public class IndexService {
                 case MessageSysFlag.TRANSACTION_ROLLBACK_TYPE:
                     return;
             }
-
+            // 如果消息的唯一键不为空，则添加到哈希索引中，以便加速根据唯一键检索消息
             if (req.getUniqKey() != null) {
                 indexFile = putKey(indexFile, msg, buildKey(topic, req.getUniqKey()));
                 if (indexFile == null) {
@@ -226,7 +228,7 @@ public class IndexService {
                     return;
                 }
             }
-
+            // 构建索引键，RocketMQ支持为同一个消息建立多个索引，多个索引键用空格分开
             if (keys != null && keys.length() > 0) {
                 String[] keyset = keys.split(MessageConst.KEY_SEPARATOR);
                 for (int i = 0; i < keyset.length; i++) {
@@ -244,7 +246,7 @@ public class IndexService {
             log.error("build index error, stop building index");
         }
     }
-
+    //循环一直重试，失败就是重新获取一个indexFile，然后再进行putKey
     private IndexFile putKey(IndexFile indexFile, DispatchRequest msg, String idxKey) {
         for (boolean ok = indexFile.putKey(idxKey, msg.getCommitLogOffset(), msg.getStoreTimestamp()); !ok; ) {
             log.warn("Index file [" + indexFile.getFileName() + "] is full, trying to create another one");
@@ -267,7 +269,7 @@ public class IndexService {
      */
     public IndexFile retryGetAndCreateIndexFile() {
         IndexFile indexFile = null;
-
+        // 尝试3次
         for (int times = 0; null == indexFile && times < MAX_TRY_IDX_CREATE; times++) {
             indexFile = this.getAndCreateLastIndexFile();
             if (null != indexFile)
@@ -289,6 +291,7 @@ public class IndexService {
         return indexFile;
     }
 
+    //获取最后的indexFile，如果写满了就新建，然后将前一个刷盘
     public IndexFile getAndCreateLastIndexFile() {
         IndexFile indexFile = null;
         IndexFile prevIndexFile = null;
@@ -298,7 +301,9 @@ public class IndexService {
         {
             this.readWriteLock.readLock().lock();
             if (!this.indexFileList.isEmpty()) {
+                //获取最后一个
                 IndexFile tmp = this.indexFileList.get(this.indexFileList.size() - 1);
+                //如果没有写满
                 if (!tmp.isWriteFull()) {
                     indexFile = tmp;
                 } else {
@@ -310,12 +315,13 @@ public class IndexService {
 
             this.readWriteLock.readLock().unlock();
         }
-
+        // 新建indexFile 然后将上一个indexFile刷盘
         if (indexFile == null) {
             try {
                 String fileName =
                     this.storePath + File.separator
                         + UtilAll.timeMillisToHumanString(System.currentTimeMillis());
+                //创建一个indexFile
                 indexFile =
                     new IndexFile(fileName, this.hashSlotNum, this.indexNum, lastUpdateEndPhyOffset,
                         lastUpdateIndexTimestamp);
@@ -332,6 +338,7 @@ public class IndexService {
                 Thread flushThread = new Thread(new Runnable() {
                     @Override
                     public void run() {
+                        // 把上一个indexFile 刷盘
                         IndexService.this.flush(flushThisFile);
                     }
                 }, "FlushIndexFileThread");

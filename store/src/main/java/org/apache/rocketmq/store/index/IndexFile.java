@@ -85,19 +85,26 @@ public class IndexFile {
         return this.mappedFile.destroy(intervalForcibly);
     }
 
+    //hashSlot里面存放的是index放入是indexCount的值（也就是当前消息的index索引），index的最后四个字节会存放前一条记录的index索引
+    //因此，key经过hash后找到slot，slot内存放最新的一个index序号，通过index序号便可以找到index，找到这个index就可以取后四位找到前一个index
     public boolean putKey(final String key, final long phyOffset, final long storeTimestamp) {
+        // 当前已使用条目小于 允许最大条目数时
         if (this.indexHeader.getIndexCount() < this.indexNum) {
+            //根据key算出哈希码
             int keyHash = indexKeyHashMethod(key);
+            //计算哈希槽
             int slotPos = keyHash % this.hashSlotNum;
+            //当前哈希槽 对应的物理地址
             int absSlotPos = IndexHeader.INDEX_HEADER_SIZE + slotPos * hashSlotSize;
 
             try {
-
+                // 读取哈希槽中存储的数据
                 int slotValue = this.mappedByteBuffer.getInt(absSlotPos);
+                //如果哈希槽存储的数据小于0或大于当前Index文件中的索引条目，则将slotValue设置为0
                 if (slotValue <= invalidIndex || slotValue > this.indexHeader.getIndexCount()) {
                     slotValue = invalidIndex;
                 }
-
+                //计算待存储消息的时间戳与第一条消息时间戳的差值，并转换成秒
                 long timeDiff = storeTimestamp - this.indexHeader.getBeginTimestamp();
 
                 timeDiff = timeDiff / 1000;
@@ -110,15 +117,18 @@ public class IndexFile {
                     timeDiff = 0;
                 }
 
+                //计算新添加条目的起始物理偏移量：
+                // 头部字节长度+哈希槽数量×单个哈希槽大小（4个字节）+当前Index条目个数×单个Index条目大小（20个字节）
                 int absIndexPos =
                     IndexHeader.INDEX_HEADER_SIZE + this.hashSlotNum * hashSlotSize
                         + this.indexHeader.getIndexCount() * indexSize;
-
+                // 依次将哈希码、消息物理偏移量、消息存储时间戳与前一条记录的index索引存入MappedByteBuffer
                 this.mappedByteBuffer.putInt(absIndexPos, keyHash);
                 this.mappedByteBuffer.putLong(absIndexPos + 4, phyOffset);
                 this.mappedByteBuffer.putInt(absIndexPos + 4 + 8, (int) timeDiff);
                 this.mappedByteBuffer.putInt(absIndexPos + 4 + 8 + 4, slotValue);
 
+                //将当前Index文件中包含的条目数量存入哈希槽中，覆盖原先哈希槽的值
                 this.mappedByteBuffer.putInt(absSlotPos, this.indexHeader.getIndexCount());
 
                 if (this.indexHeader.getIndexCount() <= 1) {
@@ -127,6 +137,7 @@ public class IndexFile {
                 }
 
                 if (invalidIndex == slotValue) {
+                    // 更新哈希槽 有数据的个数
                     this.indexHeader.incHashSlotCount();
                 }
                 this.indexHeader.incIndexCount();

@@ -21,7 +21,8 @@ import java.util.List;
 
 public class ManyPullRequest {
     private final ArrayList<PullRequest> pullRequestList = new ArrayList<>();
-
+    //下面这三个方法都加锁了，因为有两个地方在操作
+    //ReputMessageService、PullRequestHoldService
     public synchronized void addPullRequest(final PullRequest pullRequest) {
         this.pullRequestList.add(pullRequest);
     }

@@ -73,6 +73,7 @@ public class RequestFutureHolder {
 
     public synchronized void startScheduledTask(DefaultMQProducerImpl producer) {
         this.producerSet.add(producer);
+        //首次调用这个方法条件成立，每隔1s扫描scanExpiredRequest
         if (null == scheduledExecutorService) {
             this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("RequestHouseKeepingService"));
 

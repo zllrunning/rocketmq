@@ -61,7 +61,7 @@ import org.apache.rocketmq.store.PutMessageResult;
 import org.apache.rocketmq.store.config.MessageStoreConfig;
 import org.apache.rocketmq.store.config.StorePathConfigHelper;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
-
+//消息接收（接收producer的消息）处理类，将消息写入到commigLog文件后，接收流程处理完毕
 public class SendMessageProcessor extends AbstractSendMessageProcessor implements NettyRequestProcessor {
 
     private List<ConsumeMessageHook> consumeMessageHookList;
@@ -287,7 +287,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         if (queueIdInt < 0) {
             queueIdInt = randomQueueId(topicConfig.getWriteQueueNums());
         }
-
+        // 将消息包装为 MessageExtBrokerInner
         MessageExtBrokerInner msgInner = new MessageExtBrokerInner();
         msgInner.setTopic(requestHeader.getTopic());
         msgInner.setQueueId(queueIdInt);
@@ -321,6 +321,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         //会取出放在 Property 中的 PROPERTY_TRANSACTION_PREPARED 属性
         String transFlag = origProps.get(MessageConst.PROPERTY_TRANSACTION_PREPARED);
         if (Boolean.parseBoolean(transFlag)) {
+            // 事务消息
             if (this.brokerController.getBrokerConfig().isRejectTransactionMessage()) {
                 response.setCode(ResponseCode.NO_PERMISSION);
                 response.setRemark(
@@ -331,7 +332,8 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             //调用 TransactionalMessageService 的 asyncPrepareMessage() 方法来处理半事务消息
             putMessageResult = this.brokerController.getTransactionalMessageService().asyncPrepareMessage(msgInner);
         } else {
-            //MessageStore 是负责消息存储的核心组件，Message 的存、取都是由它来完成
+            // 普通消息
+            // MessageStore 是负责消息存储的核心组件，Message 的存、取都是由它来完成
             putMessageResult = this.brokerController.getMessageStore().asyncPutMessage(msgInner);
         }
         return handlePutMessageResultFuture(putMessageResult, response, request, msgInner, responseHeader, mqtraceContext, ctx, queueIdInt);
