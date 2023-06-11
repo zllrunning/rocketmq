@@ -299,7 +299,7 @@ public class DefaultMessageStore implements MessageStore {
             this.haService.start();
             this.handleScheduleMessageService(messageStoreConfig.getBrokerRole());
         }
-
+        //启动ConsumeQueue刷盘服务
         this.flushConsumeQueueService.start();
         this.commitLog.start();
         this.storeStatsService.start();
@@ -1355,6 +1355,7 @@ public class DefaultMessageStore implements MessageStore {
 
     private void addScheduleTask() {
 
+        //文件清理，每10秒一次
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
@@ -1404,7 +1405,9 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     private void cleanFilesPeriodically() {
+        //清除CommitLog文件
         this.cleanCommitLogService.run();
+        //清除ConsumeQueue文件
         this.cleanConsumeQueueService.run();
     }
 
@@ -1712,8 +1715,11 @@ public class DefaultMessageStore implements MessageStore {
 
         public void run() {
             try {
+                //删除过期文件
                 this.deleteExpiredFiles();
-
+                //善后，上面那个操作可能没成功，第一次删除有可能失败，比如有线程引用该过期文件，内存映射清理失败，都可能导致失败
+                //如果文件已经关闭，删除前检查没有通过，可以通过第二次删除
+                //判断第一个MappedFile 还可不可用了，如果不可用的话，就删了
                 this.redeleteHangedFile();
             } catch (Throwable e) {
                 DefaultMessageStore.log.warn(this.getServiceName() + " service has exception. ", e);
@@ -1722,12 +1728,23 @@ public class DefaultMessageStore implements MessageStore {
 
         private void deleteExpiredFiles() {
             int deleteCount = 0;
+            //文件保留时间，如果超过了该时间，则认为是过期文件，可以被删除，默认72小时
             long fileReservedTime = DefaultMessageStore.this.getMessageStoreConfig().getFileReservedTime();
+            //删除物理文件的间隔时间，在一次清除过程中，可能需要被删除的文件不止一个，该值指定两次删除文件的间隔时间
             int deletePhysicFilesInterval = DefaultMessageStore.this.getMessageStoreConfig().getDeleteCommitLogFilesInterval();
+            // 在清除过期文件时，如果该文件被其他线程占用（引用次数大于0，比如读取消息），
+            // 此时会阻止此次删除任务，同时在第一次试图删除该文件时记录当前时间戳，
+            // destroyMapedFileIntervalForcibly表示第一次拒绝删除之后能保留文件的最大时间，
+            // 在此时间内，同样可以被拒绝删除，超过该时间后，会将引用次数设置为负数，文件将被强制删除
             int destroyMapedFileIntervalForcibly = DefaultMessageStore.this.getMessageStoreConfig().getDestroyMapedFileIntervalForcibly();
 
+            // 指定删除文件的时间点，RocketMQ通过deleteWhen设置每天在
+            //固定时间执行一次删除过期文件操作，默认凌晨4点，支持配置多个时间点
             boolean timeup = this.isTimeToDelete();
+            //检查磁盘空间是否充足，如果磁盘空间不充足，则返回true，表示应该触发过期文件删除操作
             boolean spacefull = this.isSpaceToDelete();
+            // 预留手工触发机制，可以通过调用excuteDeleteFilesManualy方法手工触发删除过期文件的操作，
+            // 目前RocketMQ暂未封装手工触发文件删除的命令
             boolean manualDelete = this.manualDeleteFileSeveralTimes > 0;
 
             if (timeup || spacefull || manualDelete) {
@@ -1755,13 +1772,18 @@ public class DefaultMessageStore implements MessageStore {
             }
         }
 
+        //善后，上面那个操作可能没成功，第一次删除有可能失败，比如有线程引用该过期文件，内存映射清理失败，都可能导致失败
+        //如果文件已经关闭，删除前检查没有通过，可以通过第二次删除
+        //每次都判断第一个MappedFile 还可不可用了，如果不可用的话，就删了，删了第一个那第二个下一次就是第一个
         private void redeleteHangedFile() {
+            //默认120s
             int interval = DefaultMessageStore.this.getMessageStoreConfig().getRedeleteHangedFileInterval();
             long currentTimestamp = System.currentTimeMillis();
             if ((currentTimestamp - this.lastRedeleteTimestamp) > interval) {
                 this.lastRedeleteTimestamp = currentTimestamp;
                 int destroyMapedFileIntervalForcibly =
                     DefaultMessageStore.this.getMessageStoreConfig().getDestroyMapedFileIntervalForcibly();
+                //重新删除第一个MappedFile
                 if (DefaultMessageStore.this.commitLog.retryDeleteFirstFile(destroyMapedFileIntervalForcibly)) {
                 }
             }
@@ -1782,6 +1804,7 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         private boolean isSpaceToDelete() {
+            // 表示CommitLog文件、ConsumeQueue文件所在磁盘分区的最大使用量，如果超过该值，则需要立即清除过期文件
             double ratio = DefaultMessageStore.this.getMessageStoreConfig().getDiskMaxUsedSpaceRatio() / 100.0;
 
             cleanImmediately = false;
@@ -1793,6 +1816,7 @@ public class DefaultMessageStore implements MessageStore {
                 double minPhysicRatio = 100;
                 String minStorePath = null;
                 for (String storePathPhysic : storePaths) {
+                    //当前CommitLog目录所在的磁盘分区的磁盘使用率
                     double physicRatio = UtilAll.getDiskPartitionSpaceUsedPercent(storePathPhysic);
                     if (minPhysicRatio > physicRatio) {
                         minPhysicRatio =  physicRatio;
@@ -1803,6 +1827,8 @@ public class DefaultMessageStore implements MessageStore {
                     }
                 }
                 DefaultMessageStore.this.commitLog.setFullStorePaths(fullStorePath);
+                //diskSpaceWarningLevelRatio:默认0.90。如果磁盘分区使用率超过该阈值，将设置磁盘为不可写，此时会拒绝写入新消息
+                //如果当前磁盘分区使用率大于diskSpaceWarningLevelRatio，应该立即启动过期文件删除操作
                 if (minPhysicRatio > diskSpaceWarningLevelRatio) {
                     boolean diskok = DefaultMessageStore.this.runningFlags.getAndMakeDiskFull();
                     if (diskok) {
@@ -1812,8 +1838,11 @@ public class DefaultMessageStore implements MessageStore {
 
                     cleanImmediately = true;
                 } else if (minPhysicRatio > diskSpaceCleanForciblyRatio) {
+                    //diskSpaceCleanForciblyRatio：默认0.85 如果磁盘分区使用超过该阈值，建议立即执行过期文件删除，但不会拒绝写入新消息
+                    // 如果当前磁盘分区使用率大于diskSpaceCleanForciblyRatio，建议立即执行过期文件清除
                     cleanImmediately = true;
                 } else {
+                    //设置 磁盘可以写入
                     boolean diskok = DefaultMessageStore.this.runningFlags.getAndMakeDiskOK();
                     if (!diskok) {
                         DefaultMessageStore.log.info("physic disk space OK " + minPhysicRatio +
@@ -1922,15 +1951,18 @@ public class DefaultMessageStore implements MessageStore {
             int deleteLogicsFilesInterval = DefaultMessageStore.this.getMessageStoreConfig().getDeleteConsumeQueueFilesInterval();
 
             long minOffset = DefaultMessageStore.this.commitLog.getMinOffset();
+            //
             if (minOffset > this.lastPhysicalMinOffset) {
+                //记录清理的minOffset
                 this.lastPhysicalMinOffset = minOffset;
 
                 ConcurrentMap<String, ConcurrentMap<Integer, ConsumeQueue>> tables = DefaultMessageStore.this.consumeQueueTable;
 
                 for (ConcurrentMap<Integer, ConsumeQueue> maps : tables.values()) {
                     for (ConsumeQueue logic : maps.values()) {
+                        //删除consumeQueue中maxOffsetInLogicQueue < offset的那些，说明这个MappedFile都小于offset，没必要留了
                         int deleteCount = logic.deleteExpiredFile(minOffset);
-
+                        //如果删除成功了，那就等一个间隔
                         if (deleteCount > 0 && deleteLogicsFilesInterval > 0) {
                             try {
                                 Thread.sleep(deleteLogicsFilesInterval);
@@ -1939,7 +1971,7 @@ public class DefaultMessageStore implements MessageStore {
                         }
                     }
                 }
-
+                //删除 过期的 indexFile
                 DefaultMessageStore.this.indexService.deleteExpiredFile(minOffset);
             }
         }
@@ -1954,16 +1986,18 @@ public class DefaultMessageStore implements MessageStore {
         private long lastFlushTimestamp = 0;
 
         private void doFlush(int retryTimes) {
+            //获取刷盘最小页数
             int flushConsumeQueueLeastPages = DefaultMessageStore.this.getMessageStoreConfig().getFlushConsumeQueueLeastPages();
-
+            //最小刷盘页数设置为零，也就是即使很少也要刷盘了
             if (retryTimes == RETRY_TIMES_OVER) {
                 flushConsumeQueueLeastPages = 0;
             }
 
             long logicsMsgTimestamp = 0;
-
+            //获取刷盘间隔
             int flushConsumeQueueThoroughInterval = DefaultMessageStore.this.getMessageStoreConfig().getFlushConsumeQueueThoroughInterval();
             long currentTimeMillis = System.currentTimeMillis();
+            //说明大于刷盘间隔了，即便页数不够也要进行刷盘了
             if (currentTimeMillis >= (this.lastFlushTimestamp + flushConsumeQueueThoroughInterval)) {
                 this.lastFlushTimestamp = currentTimeMillis;
                 flushConsumeQueueLeastPages = 0;
@@ -1971,7 +2005,7 @@ public class DefaultMessageStore implements MessageStore {
             }
 
             ConcurrentMap<String, ConcurrentMap<Integer, ConsumeQueue>> tables = DefaultMessageStore.this.consumeQueueTable;
-
+            //逐个调用ConsumeQueue的flush方法进行刷盘
             for (ConcurrentMap<Integer, ConsumeQueue> maps : tables.values()) {
                 for (ConsumeQueue cq : maps.values()) {
                     boolean result = false;

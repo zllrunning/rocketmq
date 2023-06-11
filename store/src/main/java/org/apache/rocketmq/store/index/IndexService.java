@@ -94,7 +94,8 @@ public class IndexService {
             if (this.indexFileList.isEmpty()) {
                 return;
             }
-
+            //获取第一个indexFile 的一个offset
+            //如果endPhyOffset < offset，说明才有需要删除的内容
             long endPhyOffset = this.indexFileList.get(0).getEndPhyOffset();
             if (endPhyOffset < offset) {
                 files = this.indexFileList.toArray();
@@ -109,6 +110,7 @@ public class IndexService {
             List<IndexFile> fileList = new ArrayList<IndexFile>();
             for (int i = 0; i < (files.length - 1); i++) {
                 IndexFile f = (IndexFile) files[i];
+                //这个indexFile的EndPhyOffset<offset说明需要被删除了
                 if (f.getEndPhyOffset() < offset) {
                     fileList.add(f);
                 } else {
@@ -125,6 +127,7 @@ public class IndexService {
             try {
                 this.readWriteLock.writeLock().lock();
                 for (IndexFile file : files) {
+                    //执行delete操作
                     boolean destroyed = file.destroy(3000);
                     destroyed = destroyed && this.indexFileList.remove(file);
                     if (!destroyed) {

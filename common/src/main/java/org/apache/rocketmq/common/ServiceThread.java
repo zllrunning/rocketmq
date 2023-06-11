@@ -122,24 +122,31 @@ public abstract class ServiceThread implements Runnable {
 
     public void wakeup() {
         if (hasNotified.compareAndSet(false, true)) {
+            //此时waitPoint值变成0，就会唤醒之前waitForRunning方法中一直在等待的线程
             waitPoint.countDown(); // notify
         }
     }
 
     protected void waitForRunning(long interval) {
+        //waitForRunning方法在进入的时候先判断hasNotified是否为true（已通知），
+        // 并尝试将其更新为false（未通知），由于hasNotified的初始化值为false，
+        // 所以首次进入的时候条件不成立，不会进入到这个处理逻辑，会继续执行后面的代码
         if (hasNotified.compareAndSet(true, false)) {
             this.onWaitEnd();
             return;
         }
 
         //entry to wait
+        //重置waitPoint的值，也就是值为1
         waitPoint.reset();
 
         try {
+            //会等待waitPoint值降为0
             waitPoint.await(interval, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             log.error("Interrupted", e);
         } finally {
+            //是否被通知设置为false
             hasNotified.set(false);
             this.onWaitEnd();
         }

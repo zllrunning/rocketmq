@@ -42,8 +42,11 @@ public abstract class ReferenceResource {
 
     public void shutdown(final long intervalForcibly) {
         if (this.available) {
+            //关闭MappedFile
             this.available = false;
+            //初次关闭的时间戳
             this.firstShutdownTimestamp = System.currentTimeMillis();
+            //尝试释放资源
             this.release();
         } else if (this.getRefCount() > 0) {
             if ((System.currentTimeMillis() - this.firstShutdownTimestamp) >= intervalForcibly) {

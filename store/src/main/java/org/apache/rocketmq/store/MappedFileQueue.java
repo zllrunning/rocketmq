@@ -350,27 +350,40 @@ public class MappedFileQueue {
         }
     }
 
+    /**
+     * 删除文件
+     *
+     * 计算文件的最大存活时间（最后一个mappedFile不参与，毕竟最新的），即文件的最后一次更新时间+文件存活时间（默认72小时），
+     * 如果当前时间大于文件的最大存活时间或需要强制删除文件（当磁盘使用超过设定的阈值）时，
+     * 执行MappedFile#destory方法，清除MappedFile占有的相关资源，如果执行成功，
+     * 将该文件加入待删除文件列表中，最后统一执行File#delete方法将文件从物理磁盘中删除。
+     */
     public int deleteExpiredFileByTime(final long expiredTime,
         final int deleteFilesInterval,
         final long intervalForcibly,
         final boolean cleanImmediately) {
+        // 拿到mappedFile的引用
         Object[] mfs = this.copyMappedFiles(0);
 
         if (null == mfs)
             return 0;
-
+        //
         int mfsLength = mfs.length - 1;
         int deleteCount = 0;
         List<MappedFile> files = new ArrayList<MappedFile>();
         if (null != mfs) {
             for (int i = 0; i < mfsLength; i++) {
                 MappedFile mappedFile = (MappedFile) mfs[i];
+                //计算文件的最大存活时间，即文件的最后一次更新时间+文件存活时间（默认72小时）
                 long liveMaxTimestamp = mappedFile.getLastModifiedTimestamp() + expiredTime;
+                //如果当前时间大于文件的最大存活时间 或 需要强制删除文件（当磁盘使用超过设定的阈值）时
                 if (System.currentTimeMillis() >= liveMaxTimestamp || cleanImmediately) {
+                    //intervalForcibly表示拒绝被销毁的最大存活时间
+                    //会执行File.delete删除物理文件
                     if (mappedFile.destroy(intervalForcibly)) {
                         files.add(mappedFile);
                         deleteCount++;
-
+                        //一批 最多删除10 个
                         if (files.size() >= DELETE_FILES_BATCH_MAX) {
                             break;
                         }
@@ -390,7 +403,7 @@ public class MappedFileQueue {
                 }
             }
         }
-
+        //将这些删掉的文件清理掉mappedFiles清理掉
         deleteExpiredFile(files);
 
         return deleteCount;
@@ -408,10 +421,12 @@ public class MappedFileQueue {
             for (int i = 0; i < mfsLength; i++) {
                 boolean destroy;
                 MappedFile mappedFile = (MappedFile) mfs[i];
+                //最后一个单元位置到这个MappedFile结束，其实就是获取最后一个单元
                 SelectMappedBufferResult result = mappedFile.selectMappedBuffer(this.mappedFileSize - unitSize);
                 if (result != null) {
                     long maxOffsetInLogicQueue = result.getByteBuffer().getLong();
                     result.release();
+                    //判断是否销毁 如果小于offset 就要销毁（最大的都小，说明所有的都小）
                     destroy = maxOffsetInLogicQueue < offset;
                     if (destroy) {
                         log.info("physic min offset " + offset + ", logics in current mappedFile max offset "
@@ -424,7 +439,7 @@ public class MappedFileQueue {
                     log.warn("this being not executed forever.");
                     break;
                 }
-
+                //会执行file.delete
                 if (destroy && mappedFile.destroy(1000 * 60)) {
                     files.add(mappedFile);
                     deleteCount++;
@@ -439,11 +454,16 @@ public class MappedFileQueue {
         return deleteCount;
     }
 
+    //根据 flush的位置偏移量获取映射文件
+    //调用mappedFile的flush方法进行刷盘，并返回刷盘后的位置偏移量
+    //计算最新的flush偏移量
+    //更新flushedWhere的值为最新的flush偏移量
     public boolean flush(final int flushLeastPages) {
         boolean result = true;
         MappedFile mappedFile = this.findMappedFileByOffset(this.flushedWhere, this.flushedWhere == 0);
         if (mappedFile != null) {
             long tmpTimeStamp = mappedFile.getStoreTimestamp();
+            //调用mappedFile的flush刷盘
             int offset = mappedFile.flush(flushLeastPages);
             long where = mappedFile.getFileFromOffset() + offset;
             result = where == this.flushedWhere;
@@ -458,11 +478,15 @@ public class MappedFileQueue {
 
     public boolean commit(final int commitLeastPages) {
         boolean result = true;
+        //根据记录的CommitLog文件提交位置的偏移量获取映射文件，如果获取不为空，调用MappedFile的commit方法进行提交，然后返回本次提交数据的偏移量
         MappedFile mappedFile = this.findMappedFileByOffset(this.committedWhere, this.committedWhere == 0);
         if (mappedFile != null) {
             int offset = mappedFile.commit(commitLeastPages);
+            //记录本次提交的偏移量：文件的偏移量 + 提交数据的偏移量
             long where = mappedFile.getFileFromOffset() + offset;
+            //判断本次提交的偏移量是否等于上一次的提交偏移量，如果等于表示本次未提交任何数据，返回结果置为true，否则表示提交了数据，等待刷盘，返回结果为false
             result = where == this.committedWhere;
+            //更新committedWhere的值为本次的提交偏移量的值
             this.committedWhere = where;
         }
 
